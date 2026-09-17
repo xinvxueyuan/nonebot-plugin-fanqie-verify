@@ -93,6 +93,8 @@ class SessionStore:
         self._processing: set[_SessionKey] = set()
         # 私聊验证：账号 → 已选目标群（多群待验证时记录用户的选定群）。
         self._private_targets: dict[str, str] = {}
+        # 成员最近一次提交图片的消息 id（供超时通报引用原消息）。
+        self._last_image_msg: dict[_SessionKey, int] = {}
 
     def set_timeout_callback(self, callback: TimeoutCallback) -> None:
         """注册成员响应超时回调（由编排层注入，避免循环依赖）。"""
@@ -165,6 +167,19 @@ class SessionStore:
     def clear_private_target(self, user_id: str) -> None:
         """清除某用户的私聊验证目标群选择。"""
         self._private_targets.pop(user_id, None)
+
+    def set_last_image_message(
+        self,
+        group_id: str,
+        user_id: str,
+        message_id: int,
+    ) -> None:
+        """记录成员最近一次提交图片的消息 id（供超时通报引用原消息）。"""
+        self._last_image_msg[(group_id, user_id)] = message_id
+
+    def get_last_image_message(self, group_id: str, user_id: str) -> int | None:
+        """返回成员最近一次提交图片的消息 id；无记录时返回 ``None``。"""
+        return self._last_image_msg.get((group_id, user_id))
 
     def list_awaiting_admin(
         self,

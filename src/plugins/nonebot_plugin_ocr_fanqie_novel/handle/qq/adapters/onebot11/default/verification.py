@@ -212,8 +212,13 @@ async def on_image_submission(
         group_id=event.group_id,
         user_id=event.user_id,
         image_url=_image_url(event),
+        reply_message_id=event.message_id,
     )
-    message = MessageSegment.at(event.user_id) + f" {reply}"
+    message = (
+        MessageSegment.reply(event.message_id)
+        + MessageSegment.at(event.user_id)
+        + f" {reply}"
+    )
     await bot.send_group_msg(group_id=event.group_id, message=message)
 
 
@@ -308,15 +313,22 @@ async def on_admin_kick(
         hint = MessageSegment.at(event.user_id) + (
             " 请提供成员 QQ 号，例如：/kick 123456"
         )
-        await bot.send_group_msg(group_id=event.group_id, message=hint)
+        await bot.send_group_msg(
+            group_id=event.group_id,
+            message=MessageSegment.reply(event.message_id) + hint,
+        )
         return
     reply = await admin_decision(
         bot,
         group_id=event.group_id,
         user_id=target_user_id,
         keep=False,
+        reply_message_id=event.message_id,
     )
-    await bot.send_group_msg(group_id=event.group_id, message=reply)
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + reply,
+    )
 
 
 @_register(keep_cmd)
@@ -338,15 +350,22 @@ async def on_admin_keep(
         hint = MessageSegment.at(event.user_id) + (
             " 请提供成员 QQ 号，例如：/keep 123456"
         )
-        await bot.send_group_msg(group_id=event.group_id, message=hint)
+        await bot.send_group_msg(
+            group_id=event.group_id,
+            message=MessageSegment.reply(event.message_id) + hint,
+        )
         return
     reply = await admin_decision(
         bot,
         group_id=event.group_id,
         user_id=target_user_id,
         keep=True,
+        reply_message_id=event.message_id,
     )
-    await bot.send_group_msg(group_id=event.group_id, message=reply)
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + reply,
+    )
 
 
 @_register(approve_cmd)
@@ -363,15 +382,22 @@ async def on_admin_approve(
         hint = MessageSegment.at(event.user_id) + (
             " 请 @ 或提供成员 QQ 号，例如：通过 @成员  或  通过 123456"
         )
-        await bot.send_group_msg(group_id=event.group_id, message=hint)
+        await bot.send_group_msg(
+            group_id=event.group_id,
+            message=MessageSegment.reply(event.message_id) + hint,
+        )
         return
     reply = await admin_decision(
         bot,
         group_id=event.group_id,
         user_id=target_user_id,
         keep=True,
+        reply_message_id=event.message_id,
     )
-    await bot.send_group_msg(group_id=event.group_id, message=reply)
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + reply,
+    )
 
 
 def _is_admin_user(event: GroupMessageEvent) -> bool:
@@ -406,7 +432,10 @@ async def on_reload_config(
         policy = reload_policy()
     except PolicyConfigError as exc:
         message = MessageSegment.at(event.user_id) + f" 配置重载失败：{exc}"
-        await bot.send_group_msg(group_id=event.group_id, message=message)
+        await bot.send_group_msg(
+            group_id=event.group_id,
+            message=MessageSegment.reply(event.message_id) + message,
+        )
         return
 
     mode = "全部元素" if policy.require_all else "指定元素"
@@ -417,7 +446,10 @@ async def on_reload_config(
         f"作者白名单={total_authors} 人。"
     )
     message = MessageSegment.at(event.user_id) + f" {summary}"
-    await bot.send_group_msg(group_id=event.group_id, message=message)
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + message,
+    )
 
 
 @_register(pending_list_cmd)
@@ -450,7 +482,10 @@ async def on_admin_pending_list(
             left = f"{hours} 小时 {minutes} 分" if hours else f"{minutes} 分"
             lines.append(f"QQ {record.user_id}（剩余 {left}，/keep 或 /kick）")
         reply = f"等待管理员决策的成员 {len(records)} 人：\n" + "\n".join(lines)
-    await bot.send_group_msg(group_id=event.group_id, message=reply)
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + reply,
+    )
 
 
 @_register(processing_cmd)
@@ -478,7 +513,10 @@ async def on_processing_list(
             minutes = (remaining + 59) // 60
             lines.append(f"QQ {record.user_id}（剩余 {minutes} 分，/keep 或 /kick）")
         reply = f"等待提交截图的成员 {len(records)} 人：\n" + "\n".join(lines)
-    await bot.send_group_msg(group_id=event.group_id, message=reply)
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + reply,
+    )
 
 
 @_register(whitelist_cmd)
@@ -502,7 +540,10 @@ async def on_whitelist_view(
             f"群 {event.group_id} 验证白名单 {len(group.authors)} 位作者：\n"
             + "\n\n".join(lines)
         )
-    await bot.send_group_msg(group_id=event.group_id, message=reply)
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + reply,
+    )
 
 
 @_register(review_cmd)
@@ -540,7 +581,11 @@ async def on_review(
             user_id=target_user_id,
             triggered_by_admin=True,
         )
-    message = MessageSegment.at(event.user_id) + f" {reply}"
+    message = (
+        MessageSegment.reply(event.message_id)
+        + MessageSegment.at(event.user_id)
+        + f" {reply}"
+    )
     await bot.send_group_msg(group_id=event.group_id, message=message)
 
 

@@ -135,6 +135,7 @@ async def handle_submission(
     group_id: int,
     user_id: int,
     image_url: str | None,
+    reply_message_id: int | None = None,
 ) -> str:
     """FR2~FR8：处理新成员提交的阅读截图。
 
@@ -143,6 +144,8 @@ async def handle_submission(
         group_id: 群号。
         user_id: 成员 QQ 号。
         image_url: 图片 URL（无可用 URL 时视为下载失败）。
+        reply_message_id: 触发本次提交的消息 id，记录后供超时通报等
+            后续群消息引用原消息。
 
     Returns:
         面向用户的反馈消息。
@@ -151,6 +154,8 @@ async def handle_submission(
     store = get_session_store()
     if not store.try_claim(str(group_id), str(user_id)):
         return "当前没有待处理的验证请求。"
+    if reply_message_id:
+        store.set_last_image_message(str(group_id), str(user_id), reply_message_id)
     try:
         record = store.get(str(group_id), str(user_id))
         if record is None or record.status != "waiting":
@@ -641,8 +646,13 @@ async def handle_timeout(group_id: str, user_id: str) -> None:
         )
         return
 
-    # 超时后在群内 @ 成员提示已超时、可发送「重审」重试。
-    await actions.announce_member_timeout(bot, int(group_id), int(user_id))
+    # 超时后在群内 @ 成员提示已超时、可发送「重审」重试（引用其最后提交的图片）。
+    await actions.announce_member_timeout(
+        bot,
+        int(group_id),
+        int(user_id),
+        reply_message_id=store.get_last_image_message(group_id, user_id),
+    )
     await _record_event(
         store.get(group_id, user_id),
         event_type="verify.timeout",
@@ -676,6 +686,7 @@ async def handle_reminder(group_id: str, user_id: str, remaining_seconds: int) -
         int(group_id),
         int(user_id),
         remaining_seconds,
+        reply_message_id=store.get_last_image_message(group_id, user_id),
     )
     await _record_event(
         record,
@@ -691,6 +702,7 @@ async def admin_decision(
     group_id: int,
     user_id: int,
     keep: bool,
+    reply_message_id: int | None = None,
 ) -> str:
     """FR9：管理员决定踢出或保留。
 
@@ -703,6 +715,7 @@ async def admin_decision(
         group_id: 群号。
         user_id: 目标成员 QQ 号。
         keep: ``True`` 表示保留（/keep /通过），``False`` 表示踢出（/kick）。
+        reply_message_id: 触发本次决策的消息 id（欢迎消息引用原消息）。
 
     Returns:
         面向管理员的反馈消息。
@@ -716,7 +729,13 @@ async def admin_decision(
         record = store.end(str(group_id), str(user_id), status="approved")
         await _persist_session(record)
         await _record_event(record, event_type="verify.admin_keep", success=True)
-        await actions.send_welcome(bot, group_id, user_id)
+        await actions.send_welcome(
+            bot,
+            group_id,
+            user_id,
+            reply_message_id
+            or store.get_last_image_message(str(group_id), str(user_id)),
+        )
         return "已直接批准该成员并通过验证。"
     pre_record = store.get(str(group_id), str(user_id))
     member = await actions.get_member_info(bot, group_id, user_id)
@@ -1025,7 +1044,12 @@ async def handle_admin_decision_timeout(group_id: str, user_id: str) -> None:
         )
         return
 
-    await actions.announce_admin_timeout(bot, int(group_id), int(user_id))
+    await actions.announce_admin_timeout(
+        bot,
+        int(group_id),
+        int(user_id),
+        reply_message_id=store.get_last_image_message(group_id, user_id),
+    )
     await actions.kick_member(bot, int(group_id), int(user_id), member)
     kicked_record = store.end(group_id, user_id, status="kicked")
     await _persist_session(kicked_record)

@@ -222,3 +222,83 @@ def test_welcome_message_fallback_global(monkeypatch: pytest.MonkeyPatch) -> Non
     assert _welcome_message(123) == plugin_config.fanqie_welcome_message
     # 群不在策略里：group_policy 返回 None，同样回退全局
     assert _welcome_message(999) == plugin_config.fanqie_welcome_message
+
+
+def test_with_reply_prepends_reply_segment() -> None:
+    """_with_reply 在给定消息 id 时前置引用段，为空时原样返回。"""
+    from nonebot.adapters.onebot.v11.message import Message, MessageSegment
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        actions as actions_module,
+    )
+
+    base = Message(MessageSegment.at(10001)) + " hi"
+    assert actions_module._with_reply(base, None) == base
+    assert actions_module._with_reply(base, 0) == base
+
+    quoted = actions_module._with_reply(base, 42)
+    assert quoted[0].type == "reply"
+    assert quoted[0].data["id"] == "42"
+    assert len(quoted) == len(base) + 1
+
+
+@pytest.mark.asyncio
+async def test_announce_member_timeout_replies_only_in_group() -> None:
+    """超时通报：群消息带引用段，私发副本不带引用（私聊无引用语义）。"""
+    from nonebot.adapters.onebot.v11.message import Message
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        actions as actions_module,
+    )
+
+    class _SendBot:
+        """记录群/私聊发送的模拟 Bot。"""
+
+        self_id = "bot1"
+
+        def __init__(self) -> None:
+            self.group_msgs: list[Message] = []
+            self.private_msgs: list[Message] = []
+
+        async def send_group_msg(self, **kwargs: Any) -> None:
+            self.group_msgs.append(kwargs["message"])
+
+        async def send_private_msg(self, **kwargs: Any) -> None:
+            self.private_msgs.append(kwargs["message"])
+
+    bot: Any = _SendBot()
+    ok = await actions_module.announce_member_timeout(
+        bot,
+        123,
+        10001,
+        reply_message_id=42,
+    )
+
+    assert ok is True
+    assert bot.group_msgs[0][0].type == "reply"
+    assert bot.group_msgs[0][0].data["id"] == "42"
+    # 私发副本不带引用段（首段仍是 at）
+    assert bot.private_msgs[0][0].type == "at"
+
+
+@pytest.mark.asyncio
+async def test_send_welcome_without_reply_id_is_plain() -> None:
+    """未传 reply_message_id 时欢迎消息不带引用段（可回退）。"""
+    from nonebot.adapters.onebot.v11.message import Message
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        actions as actions_module,
+    )
+
+    class _SendBot:
+        self_id = "bot1"
+
+        def __init__(self) -> None:
+            self.group_msgs: list[Message] = []
+
+        async def send_group_msg(self, **kwargs: Any) -> None:
+            self.group_msgs.append(kwargs["message"])
+
+    bot: Any = _SendBot()
+    await actions_module.send_welcome(bot, 123, 10001)
+    assert bot.group_msgs[0][0].type == "at"

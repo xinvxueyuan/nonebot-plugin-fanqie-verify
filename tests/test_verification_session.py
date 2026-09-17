@@ -531,3 +531,19 @@ async def test_private_target_get_set_clear() -> None:
     store.clear_private_target("10001")
     assert store.get_private_target("10001") is None
     store.close()
+
+
+def test_last_image_message_roundtrip() -> None:
+    """记录/读取成员最后提交的图片消息 id（供超时通报引用原消息）。"""
+    store = SessionStore()
+    assert store.get_last_image_message("123", "10001") is None
+
+    store.set_last_image_message("123", "10001", 42)
+    assert store.get_last_image_message("123", "10001") == 42
+
+    # 覆盖写：同一会话只保留最新一条
+    store.set_last_image_message("123", "10001", 43)
+    assert store.get_last_image_message("123", "10001") == 43
+
+    # 其他会话互不影响
+    assert store.get_last_image_message("123", "20002") is None

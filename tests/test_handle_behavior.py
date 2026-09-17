@@ -605,7 +605,10 @@ async def test_kick_cmd_superuser_runs(
         )
         ctx.should_call_api(
             "send_group_msg",
-            {"group_id": _GROUP_ID, "message": "已将该成员移出群聊。"},
+            {
+                "group_id": _GROUP_ID,
+                "message": MessageSegment.reply(1) + "已将该成员移出群聊。",
+            },
         )
         ctx.receive_event(bot, event)
 
@@ -666,7 +669,7 @@ async def test_pending_list_cmd_lists_awaiting_admin(app: App) -> None:
             {
                 "group_id": _GROUP_ID,
                 "message": (
-                    "等待管理员决策的成员 2 人：\n"
+                    MessageSegment.reply(1) + "等待管理员决策的成员 2 人：\n"
                     "QQ 10001（剩余 16 小时 0 分，/keep 或 /kick）\n"
                     "QQ 20001（剩余 16 小时 0 分，/keep 或 /kick）"
                 ),
@@ -706,7 +709,9 @@ async def test_pending_list_cmd_empty(app: App) -> None:
             "send_group_msg",
             {
                 "group_id": _GROUP_ID,
-                "message": "当前没有等待管理员处理的验证成员。",
+                "message": (
+                    MessageSegment.reply(1) + "当前没有等待管理员处理的验证成员。"
+                ),
             },
         )
         ctx.receive_event(bot, event)
@@ -768,7 +773,8 @@ async def test_processing_list_cmd_lists_waiting(app: App) -> None:
             {
                 "group_id": _GROUP_ID,
                 "message": (
-                    "等待提交截图的成员 1 人：\nQQ 10001（剩余 10 分，/keep 或 /kick）"
+                    MessageSegment.reply(1)
+                    + "等待提交截图的成员 1 人：\nQQ 10001（剩余 10 分，/keep 或 /kick）"
                 ),
             },
         )
@@ -820,6 +826,7 @@ async def test_approve_cmd_superuser_direct_approve(app: App) -> None:
             {
                 "group_id": _GROUP_ID,
                 "message": Message([
+                    MessageSegment.reply(1),
                     MessageSegment.at(_USER_ID),
                     MessageSegment.text(" 验证通过，欢迎加入本群！"),
                 ]),
@@ -829,7 +836,7 @@ async def test_approve_cmd_superuser_direct_approve(app: App) -> None:
             "send_group_msg",
             {
                 "group_id": _GROUP_ID,
-                "message": "已直接批准该成员并通过验证。",
+                "message": (MessageSegment.reply(1) + "已直接批准该成员并通过验证。"),
             },
         )
         ctx.receive_event(bot, event)
@@ -926,7 +933,10 @@ async def test_whitelist_cmd_shows_authors(app: App) -> None:
             "send_group_msg",
             {
                 "group_id": _GROUP_ID,
-                "message": "群 123 验证白名单 1 位作者：\n作者：百舸川掮客\n  作品：乐队少女神人多，急需棍棒教育",
+                "message": (
+                    MessageSegment.reply(9)
+                    + "群 123 验证白名单 1 位作者：\n作者：百舸川掮客\n  作品：乐队少女神人多，急需棍棒教育"
+                ),
             },
         )
         ctx.receive_event(bot, event)

@@ -136,6 +136,22 @@ async def send_guide(bot: OneBot11Bot, group_id: int, user_id: int) -> bool:
     return True
 
 
+def _with_reply(message: Message, reply_message_id: int | None) -> Message:
+    """按需在消息前加入引用段（引用原消息发送）。
+
+    Args:
+        message: 原始消息。
+        reply_message_id: 被引用的消息 id；为 ``None``/空时原样返回。
+
+    Returns:
+        带引用段的消息（引用 id 为空则为原消息）。
+
+    """
+    if not reply_message_id:
+        return message
+    return Message(MessageSegment.reply(reply_message_id)) + message
+
+
 def _welcome_message(group_id: int) -> str:
     """返回该群的验证引导文案。
 
@@ -151,9 +167,17 @@ def _welcome_message(group_id: int) -> str:
     return plugin_config.fanqie_welcome_message
 
 
-async def send_welcome(bot: OneBot11Bot, group_id: int, user_id: int) -> bool:
-    """FR5：发送验证通过欢迎消息。"""
-    message = Message(MessageSegment.at(user_id)) + " 验证通过，欢迎加入本群！"
+async def send_welcome(
+    bot: OneBot11Bot,
+    group_id: int,
+    user_id: int,
+    reply_message_id: int | None = None,
+) -> bool:
+    """FR5：发送验证通过欢迎消息（可引用原消息）。"""
+    message = _with_reply(
+        Message(MessageSegment.at(user_id)) + " 验证通过，欢迎加入本群！",
+        reply_message_id,
+    )
     try:
         await bot.send_group_msg(group_id=group_id, message=message)
     except ActionFailed:
@@ -166,10 +190,13 @@ async def announce_admin_timeout(
     bot: OneBot11Bot,
     group_id: int,
     user_id: int,
+    reply_message_id: int | None = None,
 ) -> bool:
-    """管理员决策超时：在群内通报该成员将被移出。"""
-    message = Message(MessageSegment.at(user_id)) + (
-        " 验证未通过且管理员超时未处理，现将其移出群聊。"
+    """管理员决策超时：在群内通报该成员将被移出（可引用原消息）。"""
+    message = _with_reply(
+        Message(MessageSegment.at(user_id))
+        + " 验证未通过且管理员超时未处理，现将其移出群聊。",
+        reply_message_id,
     )
     try:
         await bot.send_group_msg(group_id=group_id, message=message)
@@ -183,12 +210,14 @@ async def announce_member_timeout(
     bot: OneBot11Bot,
     group_id: int,
     user_id: int,
+    reply_message_id: int | None = None,
 ) -> bool:
     """FR7：成员响应超时后，在群内 @ 成员提示已超时并指引重审。
 
     群消息发送成功后，额外私发一份给该新用户（便于其及时看到超时提示）。
     私发失败/异常静默屏蔽——对方可能未开启临时会话或已屏蔽机器人，不影响
-    群消息主流程与返回结果。
+    群消息主流程与返回结果。群消息可引用成员最后提交的图片消息；私聊
+    无法跨会话引用，私发副本不带引用段。
     """
     message = Message(MessageSegment.at(user_id)) + (
         " 验证超时未收到书评截图。如需继续验证，请在群内发送「重审」重试，"
@@ -196,11 +225,14 @@ async def announce_member_timeout(
     )
     ok = True
     try:
-        await bot.send_group_msg(group_id=group_id, message=message)
+        await bot.send_group_msg(
+            group_id=group_id,
+            message=_with_reply(message, reply_message_id),
+        )
     except ActionFailed:
         logger.warning("群内提示成员超时失败 group={} user={}", group_id, user_id)
         ok = False
-    # 私发一份给新用户（尽力而为，失败静默）。
+    # 私发一份给新用户（尽力而为，失败静默；私聊无引用语义）。
     try:
         await bot.send_private_msg(user_id=user_id, message=message)
     except Exception:  # noqa: BLE001 - 私发失败需静默，不影响主流程
@@ -213,6 +245,7 @@ async def announce_kick_reminder(
     group_id: int,
     user_id: int,
     remaining_seconds: int,
+    reply_message_id: int | None = None,
 ) -> bool:
     """管理决策超时前提醒成员：临近被移出，指引重审。
 
@@ -221,15 +254,20 @@ async def announce_kick_reminder(
         group_id: 群号。
         user_id: 成员 QQ 号。
         remaining_seconds: 距被移出剩余的秒数。
+        reply_message_id: 被引用的消息 id；为空则不带引用段。
 
     Returns:
         是否发送成功。
 
     """
     remaining = _format_remaining(remaining_seconds)
-    message = Message(MessageSegment.at(user_id)) + (
-        f" 您的验证尚未通过，距被移出群聊还有约 {remaining}。"
-        "如需继续验证，请在群内发送「重审」重试，或请管理员处理。"
+    message = _with_reply(
+        Message(MessageSegment.at(user_id))
+        + (
+            f" 您的验证尚未通过，距被移出群聊还有约 {remaining}。"
+            "如需继续验证，请在群内发送「重审」重试，或请管理员处理。"
+        ),
+        reply_message_id,
     )
     try:
         await bot.send_group_msg(group_id=group_id, message=message)
