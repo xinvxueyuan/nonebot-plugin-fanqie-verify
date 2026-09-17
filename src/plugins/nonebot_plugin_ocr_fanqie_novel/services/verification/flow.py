@@ -175,7 +175,11 @@ async def handle_submission(
         if not image_url:
             return await _handle_download_failure(group_id, user_id)
 
-        evidence = await _recognize_and_extract(image_url, group_id, record)
+        evidence = (
+            await _recognize_and_extract(image_url, group_id, record)
+            if plugin_config.fanqie_ocr_enabled
+            else None
+        )
         if evidence is None:
             return await _handle_vision_fallback(
                 bot, group_id, user_id, image_url, record
@@ -216,7 +220,7 @@ async def _handle_vision_fallback(
     image_url: str,
     record: SessionRecord,
 ) -> str:
-    """OCR 识别不出时改用视觉模型看图兜底判定。"""
+    """OCR 识别不出（或 OCR 已停用）时改用视觉模型看图判定。"""
     verdict = await vision.vision_fallback(image_url, group_id)
     if verdict is not None:
         fallback_evidence = vision.verdict_to_evidence(verdict)
@@ -227,6 +231,7 @@ async def _handle_vision_fallback(
             success=True,
             detail={
                 "fallback": "vision",
+                "ocr_enabled": plugin_config.fanqie_ocr_enabled,
                 "model": verdict.model,
                 "prompt": verdict.prompt,
                 "image_url": image_url,
@@ -237,14 +242,14 @@ async def _handle_vision_fallback(
         )
         if verdict.passed:
             logger.info(
-                "视觉兜底判定通过 group={} user={} trace={}",
+                "视觉判定通过 group={} user={} trace={}",
                 group_id,
                 user_id,
                 record.trace_id,
             )
             return await _handle_pass(bot, group_id, user_id)
         logger.info(
-            "视觉兜底判定拒绝 group={} user={} reason={} trace={}",
+            "视觉判定拒绝 group={} user={} reason={} trace={}",
             group_id,
             user_id,
             verdict.reason,

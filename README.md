@@ -96,6 +96,7 @@
 | `FANQIE_OCR_API_TOKEN` | OCR API 认证令牌（必填） | 空 |
 | `FANQIE_OCR_TIMEOUT` | 单次 HTTP 请求超时（秒） | `15` |
 | `FANQIE_OCR_POLL_TIMEOUT` | 等待 OCR 任务完成总超时（秒） | `120` |
+| `FANQIE_OCR_ENABLED` | 是否启用 PaddleOCR 识别；`false` 时跳过 OCR 直接走视觉模型判定（仅视觉模式） | `true` |
 | `FANQIE_OCR_MODEL` | PaddleOCR 模型名 | `PaddleOCR-VL-1.6` |
 | `FANQIE_OCR_MODELS` | 多模型并行识别的模型集合（JSON 数组），结果按字段融合 | `["PaddleOCR-VL-1.6", "PP-OCRv6", "PP-StructureV3"]` |
 | `FANQIE_SIMILARITY_THRESHOLD` | 多模型字段融合的置信度阈值（0~1） | `0.9` |

@@ -30,6 +30,8 @@ class Config(BaseModel):
             管理员主动发起的重审不受此限制。默认 2 次。
         fanqie_notify_admin: 验证失败时是否私信通知管理员决定通过或踢出。
         fanqie_book_name_max_len: FR4 综合判断中有效书名的最大字符数。
+        fanqie_ocr_enabled: 是否启用 PaddleOCR 识别。为 False 时跳过 OCR，
+            直接使用视觉模型判定（仅视觉模式）。默认 True（启用）。
         fanqie_ocr_api_url: PaddleOCR 云端 API 地址（留空使用官方默认服务）。
         fanqie_ocr_api_token: 调用云端 OCR API 的认证令牌。
         fanqie_ocr_timeout: 单次 HTTP 请求的超时时间（秒）。
@@ -72,6 +74,7 @@ class Config(BaseModel):
     fanqie_review_max_times: int = 2
     fanqie_notify_admin: bool = True
     fanqie_book_name_max_len: int = 100
+    fanqie_ocr_enabled: bool = True
     fanqie_ocr_api_url: str = ""
     fanqie_ocr_api_token: str = ""
     fanqie_ocr_timeout: float = 15.0

@@ -247,6 +247,72 @@ async def test_vision_review_approves(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ocr_disabled_skips_ocr_and_uses_vision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FANQIE_OCR_ENABLED=False 时应跳过 OCR，直接由视觉模型判定。"""
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+
+    recognize_calls: list[str] = []
+
+    async def fake_recognize(url: str, *, models: list[str] | None = None) -> Any:
+        _ = models
+        recognize_calls.append(url)
+        return {_m: _ocr_result_with_evidence() for _m in ["PaddleOCR-VL-1.6"]}
+
+    monkeypatch.setattr(flow_module, "recognize_image_url_multi", fake_recognize)
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(
+        flow_module.vision,
+        "vision_fallback",
+        AsyncMock(
+            return_value=flow_module.vision.VisionVerdict(passed=True, reason=None)
+        ),
+    )
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    assert recognize_calls == []  # OCR 完全未被调用
+    assert "验证通过" in reply
+    record = get_session_store().get("123", "10001")
+    assert record is not None
+    assert record.status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_ocr_disabled_vision_unavailable_counts_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OCR 停用时视觉模型不可用，应按识别失败计次（消耗重试次数）。"""
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(plugin_config, "fanqie_max_attempts", 3)
+    monkeypatch.setattr(
+        flow_module.vision, "vision_fallback", AsyncMock(return_value=None)
+    )
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    assert "识别失败" in reply
+    record = get_session_store().get("123", "10001")
+    assert record is not None
+    assert record.retry_count == 1
+
+
+@pytest.mark.asyncio
 async def test_handle_submission_insufficient_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
