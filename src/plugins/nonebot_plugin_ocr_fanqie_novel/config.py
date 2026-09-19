@@ -58,6 +58,12 @@ class Config(BaseModel):
             「补验确认」后执行。
         fanqie_backfill_max_batch: 单次补验的人数上限（防止一次性给大量成员
             开启验证造成刷屏）。默认 20。
+        fanqie_extend_enabled: 是否启用「延期」命令（推迟待管理员决策成员的
+            移出时间，供管理员暂时无法处理时使用）。默认 True。
+        fanqie_extend_default_hours: 「延期」不带时长参数时的默认延期小时数。
+            默认 6 小时。
+        fanqie_extend_max_hours: 「延期」单次可延长的最大小时数，超过时按该
+            上限处理。默认 48 小时。不限制累计延期次数。
         fanqie_private_verify_enabled: 是否启用「私聊发图完成验证」通道。
             为 False 时停用私聊图片验证与「验证 <群号>」选群命令，仅保留
             群内验证。默认 True（启用）。
@@ -83,6 +89,9 @@ class Config(BaseModel):
     fanqie_backfill_reconnect_mode: str = "notify"
     fanqie_backfill_confirm_first: bool = False
     fanqie_backfill_max_batch: int = 20
+    fanqie_extend_enabled: bool = True
+    fanqie_extend_default_hours: int = 6
+    fanqie_extend_max_hours: int = 48
     fanqie_private_verify_enabled: bool = True
     fanqie_response_timeout: int = 600
     fanqie_max_attempts: int = 3

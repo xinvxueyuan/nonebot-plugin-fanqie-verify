@@ -472,6 +472,41 @@ class SessionStore:
         except Exception:
             logger.exception("处理会话超时失败: {}", key)
 
+    def extend_awaiting(
+        self,
+        group_id: str,
+        user_id: str,
+        *,
+        seconds: int,
+    ) -> SessionRecord | None:
+        """延期待管理员决策会话的移出时间（从当前时间重新计时）。
+
+        管理员暂时无法处理时推迟自动移出：新截止时间 = 「当前时间 + 延期
+        时长」，而非在原截止上累加（原截止已临近或已过时更直观）。延期后
+        重新调度超时任务与被移出前提醒。
+
+        Args:
+            group_id: 群号。
+            user_id: 成员 QQ 号。
+            seconds: 延期时长（秒），调用方负责按配置上限裁剪。
+
+        Returns:
+            更新后的会话记录；会话不存在或不在 ``awaiting_admin`` 状态时
+            返回 ``None``。
+
+        """
+        key = (group_id, user_id)
+        record = self.get(group_id, user_id)
+        if record is None or record.status != "awaiting_admin":
+            return None
+        self._cancel_timeout(key)
+        data = record.to_db_dict()
+        data["expires_at"] = datetime.now(UTC) + timedelta(seconds=seconds)
+        updated = SessionRecord(**data)
+        self._sessions[key] = updated
+        self._schedule_timeout(key)
+        return updated
+
     def await_admin(
         self,
         group_id: str,

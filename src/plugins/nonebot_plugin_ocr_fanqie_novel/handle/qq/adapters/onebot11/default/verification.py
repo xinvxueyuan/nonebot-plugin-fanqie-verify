@@ -26,6 +26,7 @@ from ......handle.qq.commands.verification import (
     approve_cmd,
     backfill_cmd,
     backfill_confirm_cmd,
+    extend_cmd,
     group_admin_change,
     group_ban,
     group_decrease,
@@ -59,6 +60,8 @@ _MINUTES_PER_HOUR = 60
 _BACKFILL_MIN_QQ = 10000
 #: 补验扫描窗口的允许上限（小时）。
 _BACKFILL_MAX_HOURS = 720
+#: 延期时长的下限（小时）：小于该值视为非法参数。
+_EXTEND_MIN_HOURS = 1
 
 
 def _ensure_aware(dt: datetime | None) -> datetime | None:
@@ -753,3 +756,254 @@ def _extract_target_user(args: Message, event: GroupMessageEvent) -> int | None:
                 except (TypeError, ValueError):
                     return None
     return None
+
+
+def _format_remaining(expires_at: datetime | None, now: datetime) -> str:
+    """把截止时间格式化为剩余时长的可读文本（如「6 小时」「1 小时 30 分」）。"""
+    exp = _ensure_aware(expires_at) or now
+    remaining = max(0, int((exp - now).total_seconds()))
+    hours, remainder = divmod(remaining, _SECONDS_PER_HOUR)
+    minutes = (remainder + 59) // 60
+    if minutes >= _MINUTES_PER_HOUR:
+        hours += 1
+        minutes = 0
+    if hours and minutes:
+        return f"{hours} 小时 {minutes} 分"
+    if hours:
+        return f"{hours} 小时"
+    return f"{minutes} 分"
+
+
+def _parse_extend_args(
+    args: Message,
+    event: GroupMessageEvent,
+    default_hours: int,
+    max_hours: int,
+) -> tuple[int, list[int], bool]:
+    """解析延期命令参数：返回 (小时数, 指定成员 QQ 号列表, 是否被上限裁剪)。
+
+    纯数字参数按大小区分：小于 ``_BACKFILL_MIN_QQ`` 视为小时数，否则视为
+    成员 QQ 号；``@成员`` 一律视为指定成员（``@机器人`` 自身除外）。小时数
+    超过 ``max_hours`` 时按上限取值并标记已裁剪；显式给 0 小时视为非法
+    （返回 0，由调用方提示）。
+
+    Args:
+        args: 命令参数。
+        event: 群消息事件。
+        default_hours: 不带时长参数时的默认小时数。
+        max_hours: 单次延期的上限小时数。
+
+    Returns:
+        三元组：延期小时数（0 表示参数非法）、指定成员 QQ 号列表、是否被裁剪。
+
+    """
+    hours = max(_EXTEND_MIN_HOURS, default_hours)
+    capped = False
+    targets: list[int] = []
+    for token in args.extract_plain_text().split():
+        if not token.isdigit():
+            continue
+        value = int(token)
+        if value >= _BACKFILL_MIN_QQ:
+            targets.append(value)
+        elif value >= _EXTEND_MIN_HOURS:
+            if value > max_hours:
+                hours, capped = max_hours, True
+            else:
+                hours = value
+        else:
+            hours = 0  # 延期 0 小时无意义，交由调用方提示
+    targets.extend(_extract_at_users(event))
+    return hours, targets, capped
+
+
+def _extract_at_users(event: GroupMessageEvent) -> list[int]:
+    """提取消息里 ``@`` 的成员 QQ 号（排除 ``@全体成员`` 与 ``@机器人`` 自身）。"""
+    self_id = int(getattr(event, "self_id", 0) or 0)
+    users: list[int] = []
+    for segment in event.message:
+        if segment.type != "at":
+            continue
+        qq = segment.data.get("qq")
+        if qq is None or qq == "all":
+            continue
+        try:
+            user_id = int(qq)
+        except (TypeError, ValueError):
+            continue
+        if self_id and user_id == self_id:
+            continue  # 排除 @机器人 自身
+        users.append(user_id)
+    return users
+
+
+async def _send_extend_reply(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+    reply: str,
+) -> None:
+    """发送延期相关回复（引用原命令消息）。"""
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + reply,
+    )
+
+
+def _format_extend_result(
+    results: list[Any],
+    *,
+    hours: int,
+    capped: bool,
+    max_hours: int,
+    scoped_all: bool,
+) -> str:
+    """组装延期结果文案。"""
+    now = datetime.now(UTC)
+    lines = [
+        f"QQ {record.user_id}（剩余 {_format_remaining(record.expires_at, now)}）"
+        for record in results
+    ]
+    scope = "本群全部待审成员" if scoped_all else "指定成员"
+    head = f"已为{scope}延期 {hours} 小时（从当前时间重新计时），共 {len(results)} 人"
+    text = head + "：\n" + "\n".join(lines)
+    if capped:
+        text += f"\n注：单次延期上限 {max_hours} 小时，已按上限处理。"
+    return text
+
+
+async def _check_command_permission(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+) -> bool:
+    """命令权限检查：允许群管理员时要求其具备管理权限，否则仅限配置管理员。"""
+    from ......core.config import plugin_config
+
+    if plugin_config.fanqie_allow_group_admin_commands:
+        return await _is_privileged(bot, event)
+    return _is_admin_user(event)
+
+
+def _extend_targets(
+    store: Any,
+    group_id: str,
+    targets: list[int],
+    *,
+    seconds: int,
+) -> tuple[list[Any], list[str]]:
+    """延期指定成员（按 QQ 号去重保序）。
+
+    Returns:
+        二元组：成功延期的会话记录列表、未延期（不在待管理员决策状态）的 QQ 号。
+
+    """
+    results: list[Any] = []
+    skipped: list[str] = []
+    for user_id in dict.fromkeys(targets):
+        record = store.extend_awaiting(group_id, str(user_id), seconds=seconds)
+        if record is None:
+            skipped.append(str(user_id))
+        else:
+            results.append(record)
+    return results, skipped
+
+
+def _extend_all_awaiting(
+    store: Any,
+    group_id: str,
+    records: tuple[Any, ...],
+    *,
+    seconds: int,
+) -> list[Any]:
+    """延期本群全部待管理员决策成员，返回成功延期的记录列表。"""
+    results: list[Any] = []
+    for record in records:
+        updated = store.extend_awaiting(
+            group_id,
+            record.user_id,
+            seconds=seconds,
+        )
+        if updated is not None:
+            results.append(updated)
+    return results
+
+
+@_register(extend_cmd)
+async def on_extend(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+) -> None:
+    """延期：推迟「待管理员决策」成员的自动移出时间。
+
+    带 ``@成员``/QQ 号时只延期指定成员，否则延期本群全部待审成员；不带
+    时长时使用 ``FANQIE_EXTEND_DEFAULT_HOURS``，单次上限
+    ``FANQIE_EXTEND_MAX_HOURS``（不限制累计次数）。
+    """
+    from ......core.config import plugin_config
+
+    if not await _check_command_permission(bot, event):
+        return
+    if not plugin_config.fanqie_extend_enabled:
+        await _send_extend_reply(
+            bot,
+            event,
+            "延期功能已停用（FANQIE_EXTEND_ENABLED=false）。",
+        )
+        return
+    max_hours = max(_EXTEND_MIN_HOURS, plugin_config.fanqie_extend_max_hours)
+    hours, targets, capped = _parse_extend_args(
+        args,
+        event,
+        plugin_config.fanqie_extend_default_hours,
+        max_hours,
+    )
+    if hours < _EXTEND_MIN_HOURS:
+        await _send_extend_reply(
+            bot,
+            event,
+            f"延期时长需为不小于 {_EXTEND_MIN_HOURS} 的整数小时，"
+            f"例如：延期 @成员 12（上限 {max_hours} 小时）",
+        )
+        return
+
+    store = get_session_store()
+    group_id = str(event.group_id)
+    seconds = hours * _SECONDS_PER_HOUR
+    if targets:
+        results, skipped = _extend_targets(store, group_id, targets, seconds=seconds)
+        if not results:
+            await _send_extend_reply(
+                bot,
+                event,
+                "指定成员均不在「待管理员决策」状态"
+                "（可能已处理完毕，或仍在等待提交截图），未延期。",
+            )
+            return
+        reply = _format_extend_result(
+            results,
+            hours=hours,
+            capped=capped,
+            max_hours=max_hours,
+            scoped_all=False,
+        )
+        if skipped:
+            reply += "\n未延期（不在待管理员决策状态）：" + "、".join(
+                f"QQ {uid}" for uid in skipped
+            )
+    else:
+        records = store.list_awaiting_admin(group_id)
+        if not records:
+            await _send_extend_reply(bot, event, "本群当前没有待管理员决策的成员。")
+            return
+        results = _extend_all_awaiting(store, group_id, records, seconds=seconds)
+        if not results:
+            await _send_extend_reply(bot, event, "没有可延期的成员。")
+            return
+        reply = _format_extend_result(
+            results,
+            hours=hours,
+            capped=capped,
+            max_hours=max_hours,
+            scoped_all=True,
+        )
+    await _send_extend_reply(bot, event, reply)

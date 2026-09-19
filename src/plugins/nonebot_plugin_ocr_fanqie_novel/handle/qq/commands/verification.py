@@ -171,6 +171,16 @@ backfill_confirm_cmd = on_command(
     block=True,
 )
 
+# 延期：推迟「待管理员决策」成员的自动移出时间（管理员暂时无法处理时用）。
+# 不带成员时作用于本群全部待审成员；不带时长时按配置的默认小时数延期。
+extend_cmd = on_command(
+    "延期",
+    aliases={"推迟", "延长", "/延期", "/extend"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+)
+
 # 重审：普通成员重审自己（限次数），管理员可 @ 任意普通成员重审（不限次数）。
 # 不带 permission 限定——权限与次数在处理器内按发起者身份判断。
 review_cmd = on_command(
@@ -185,6 +195,7 @@ __all__ = [
     "approve_cmd",
     "backfill_cmd",
     "backfill_confirm_cmd",
+    "extend_cmd",
     "group_admin_change",
     "group_ban",
     "group_decrease",
