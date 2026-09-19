@@ -971,3 +971,248 @@ def test_is_sticker_and_contains_image_exclude_emoji() -> None:
     assert cmd_module._contains_image(sticker_event) is False
     image_event: Any = _FakeEvent(Message([MessageSegment.image("http://x/a.png")]))
     assert cmd_module._contains_image(image_event) is True
+
+
+def _backfill_event(message_id: int = 1, text: str = "/补验") -> Any:
+    """构造一条补验命令的群消息事件。"""
+    from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegment
+
+    return GroupMessageEvent(
+        time=int(time.time()),
+        self_id=_SELF_ID,
+        post_type="message",
+        message_type="group",
+        sub_type="normal",
+        message_id=message_id,
+        group_id=_GROUP_ID,
+        user_id=1330509996,
+        anonymous=None,
+        sender={"user_id": 1330509996, "nickname": "管理", "role": "owner"},
+        raw_message=text,
+        message=Message([MessageSegment.text(text)]),
+        font=0,
+    )  # type: ignore[call-arg]
+
+
+def _patch_backfill(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    confirm_first: bool = False,
+    started: list[int] | None = None,
+) -> list[int]:
+    """替换补验的扫描与执行，返回记录已开启验证的成员列表。
+
+    同时把重连模式置为 off：``on_bot_connect`` 的重连补验会抢先调用群 API，
+    消费掉测试为 handler 声明的 API 期望队列。
+    """
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        backfill as backfill_module,
+    )
+
+    recorded = started if started is not None else []
+
+    async def fake_collect(
+        bot: Any,
+        *,
+        group_id: int,
+        hours: int,
+        targets: list[int] | None = None,
+    ) -> Any:
+        _ = (bot, group_id, hours, targets)
+        return [backfill_module.BackfillCandidate(20001, "新人", 1)]
+
+    async def fake_run(
+        bot: Any,
+        *,
+        group_id: int,
+        candidates: Any,
+        max_batch: int | None = None,
+    ) -> int:
+        _ = (bot, group_id, max_batch)
+        recorded.extend(candidate.user_id for candidate in candidates)
+        return len(candidates)
+
+    monkeypatch.setattr(backfill_module, "collect_candidates", fake_collect)
+    monkeypatch.setattr(backfill_module, "run_backfill", fake_run)
+    monkeypatch.setattr(plugin_config, "fanqie_backfill_enabled", True)
+    monkeypatch.setattr(plugin_config, "fanqie_backfill_reconnect_mode", "off")
+    monkeypatch.setattr(plugin_config, "fanqie_backfill_confirm_first", confirm_first)
+    return recorded
+
+
+def _patch_empty_backfill(monkeypatch: pytest.MonkeyPatch) -> None:
+    """替换补验扫描为「无候选」（用于确认命令的边界测试）。"""
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        backfill as backfill_module,
+    )
+
+    async def fake_collect(
+        bot: Any,
+        *,
+        group_id: int,
+        hours: int,
+        targets: list[int] | None = None,
+    ) -> Any:
+        _ = (bot, group_id, hours, targets)
+        return []
+
+    monkeypatch.setattr(backfill_module, "collect_candidates", fake_collect)
+    monkeypatch.setattr(plugin_config, "fanqie_backfill_enabled", True)
+    monkeypatch.setattr(plugin_config, "fanqie_backfill_reconnect_mode", "off")
+
+
+@pytest.mark.asyncio
+async def test_backfill_cmd_starts_verification(
+    app: App,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """补验命令（默认直接模式）应把候选成员纳入验证流程并回复数量。"""
+    from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, MessageSegment
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        get_session_store,
+    )
+
+    started = _patch_backfill(monkeypatch)
+    get_session_store().pop_pending_backfill(str(_GROUP_ID))
+
+    async with app.test_matcher(cmd_module.backfill_cmd) as ctx:
+        bot = ctx.create_bot(base=OneBot11Bot)
+        ctx.should_call_api(
+            "send_group_msg",
+            {
+                "group_id": _GROUP_ID,
+                "message": (
+                    MessageSegment.reply(1) + "已为 1 名成员开启验证"
+                    "（已发送引导并开始计时，未通过将转管理员处理）。"
+                ),
+            },
+        )
+        ctx.receive_event(bot, _backfill_event())
+
+    assert started == [20001]
+
+
+@pytest.mark.asyncio
+async def test_backfill_cmd_confirm_first_lists_and_stores(
+    app: App,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """confirm_first 模式只列候选名单并暂存，不开启验证。"""
+    from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, MessageSegment
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        get_session_store,
+    )
+
+    started = _patch_backfill(monkeypatch, confirm_first=True)
+
+    async with app.test_matcher(cmd_module.backfill_cmd) as ctx:
+        bot = ctx.create_bot(base=OneBot11Bot)
+        ctx.should_call_api(
+            "send_group_msg",
+            {
+                "group_id": _GROUP_ID,
+                "message": (
+                    MessageSegment.reply(1)
+                    + "群 123 待补验成员 1 人：\nQQ 20001（新人）"
+                    "\n\n回复「补验确认」执行补验。"
+                ),
+            },
+        )
+        ctx.receive_event(bot, _backfill_event())
+
+    assert started == []  # 未开启验证
+    assert get_session_store().pop_pending_backfill(str(_GROUP_ID)) == [20001]
+
+
+@pytest.mark.asyncio
+async def test_backfill_confirm_cmd_executes_pending(
+    app: App,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """补验确认命令应执行暂存的候选名单。"""
+    from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, MessageSegment
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        get_session_store,
+    )
+
+    started = _patch_backfill(monkeypatch)
+    get_session_store().set_pending_backfill(str(_GROUP_ID), [20001])
+
+    async with app.test_matcher(cmd_module.backfill_confirm_cmd) as ctx:
+        bot = ctx.create_bot(base=OneBot11Bot)
+        ctx.should_call_api(
+            "send_group_msg",
+            {
+                "group_id": _GROUP_ID,
+                "message": MessageSegment.reply(1) + "已为 1 名成员开启验证。",
+            },
+        )
+        ctx.receive_event(bot, _backfill_event(text="/补验确认"))
+
+    assert started == [20001]
+    # 名单已消费，不可重复执行
+    assert get_session_store().pop_pending_backfill(str(_GROUP_ID)) == []
+
+
+@pytest.mark.asyncio
+async def test_backfill_confirm_cmd_without_pending(
+    app: App,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没有待确认名单时提示先发送补验。"""
+    from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, MessageSegment
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+        get_session_store,
+    )
+
+    _patch_empty_backfill(monkeypatch)
+    get_session_store().pop_pending_backfill(str(_GROUP_ID))
+
+    async with app.test_matcher(cmd_module.backfill_confirm_cmd) as ctx:
+        bot = ctx.create_bot(base=OneBot11Bot)
+        ctx.should_call_api(
+            "send_group_msg",
+            {
+                "group_id": _GROUP_ID,
+                "message": (
+                    MessageSegment.reply(1) + "没有待确认的补验名单，请先发送「补验」。"
+                ),
+            },
+        )
+        ctx.receive_event(bot, _backfill_event(text="/补验确认"))
+
+
+def test_parse_backfill_args_minutes_and_qq() -> None:
+    """补验参数解析：小数视为小时数，大数视为 QQ 号，@ 视为指定成员。"""
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+    from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.adapters.onebot11.default import (
+        verification as adapter_module,
+    )
+
+    class _FakeEvent:
+        def __init__(self, message: Message) -> None:
+            self.message = message
+
+    hours, targets = adapter_module._parse_backfill_args(
+        Message(MessageSegment.text("48 12345678")),
+        _FakeEvent(Message([MessageSegment.at(20001)])),  # type: ignore[arg-type]
+        24,
+    )
+    assert hours == 48
+    assert targets == [12345678, 20001]
+
+    # 无参数时用默认窗口
+    hours, targets = adapter_module._parse_backfill_args(
+        Message(MessageSegment.text("")),
+        _FakeEvent(Message([])),  # type: ignore[arg-type]
+        24,
+    )
+    assert hours == 24
+    assert targets == []

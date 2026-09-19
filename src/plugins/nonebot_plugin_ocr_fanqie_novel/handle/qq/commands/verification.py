@@ -151,6 +151,26 @@ whitelist_cmd = on_command(
     block=True,
 )
 
+# 补验：把错过入群事件的成员补进验证流程（LLBot 掉线重连等场景）。
+# 无参数时扫描最近 N 小时（配置默认）内入群且无验证记录的成员；
+# 也可带小时数（如「补验 48」）或直接指定成员（@成员 / QQ 号）。
+backfill_cmd = on_command(
+    "补验",
+    aliases={"补验证", "同步入群", "漏验扫描", "/补验"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+)
+
+# 补验确认：执行「补验」列出的候选名单（confirm_first 模式使用）。
+backfill_confirm_cmd = on_command(
+    "补验确认",
+    aliases={"确认补验", "/补验确认"},
+    permission=SUPERUSER,
+    priority=5,
+    block=True,
+)
+
 # 重审：普通成员重审自己（限次数），管理员可 @ 任意普通成员重审（不限次数）。
 # 不带 permission 限定——权限与次数在处理器内按发起者身份判断。
 review_cmd = on_command(
@@ -163,6 +183,8 @@ review_cmd = on_command(
 
 __all__ = [
     "approve_cmd",
+    "backfill_cmd",
+    "backfill_confirm_cmd",
     "group_admin_change",
     "group_ban",
     "group_decrease",

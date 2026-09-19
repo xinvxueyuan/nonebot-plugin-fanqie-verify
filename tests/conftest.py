@@ -44,6 +44,9 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.setdefault("SQLALCHEMY_DATABASE_URL", "sqlite+aiosqlite:///fanqie.db")
     os.environ.setdefault("SUPERUSERS", '["1330509996"]')
     os.environ.setdefault("FANQIE_ADMIN_IDS", "[1330509996]")
+    # 补验默认关闭：on_bot_connect 的补验会在后台调用群成员列表等 API，
+    # 干扰测试对 API 调用序列的断言。补验相关测试自行开启并 mock。
+    os.environ.setdefault("FANQIE_BACKFILL_ENABLED", "false")
     # COMMAND_START 必须走环境变量（JSON 形式），nonebot 才能保留空字符串前缀；
     # 直接以 Python list 参数传入时空字符串会被丢弃，导致裸命令（无 / 前缀）不匹配。
     os.environ.setdefault("COMMAND_START", '["", "/"]')

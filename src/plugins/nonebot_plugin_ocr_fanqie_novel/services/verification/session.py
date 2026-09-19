@@ -95,6 +95,8 @@ class SessionStore:
         self._private_targets: dict[str, str] = {}
         # 成员最近一次提交图片的消息 id（供超时通报引用原消息）。
         self._last_image_msg: dict[_SessionKey, int] = {}
+        # 待确认的补验候选（群号 → 成员 QQ 号），confirm_first 模式下暂存。
+        self._pending_backfill: dict[str, list[int]] = {}
 
     def set_timeout_callback(self, callback: TimeoutCallback) -> None:
         """注册成员响应超时回调（由编排层注入，避免循环依赖）。"""
@@ -180,6 +182,14 @@ class SessionStore:
     def get_last_image_message(self, group_id: str, user_id: str) -> int | None:
         """返回成员最近一次提交图片的消息 id；无记录时返回 ``None``。"""
         return self._last_image_msg.get((group_id, user_id))
+
+    def set_pending_backfill(self, group_id: str, user_ids: list[int]) -> None:
+        """暂存待管理员确认的补验候选成员（「补验确认」命令读取）。"""
+        self._pending_backfill[group_id] = list(user_ids)
+
+    def pop_pending_backfill(self, group_id: str) -> list[int]:
+        """取出并清除某群待确认的补验候选成员。"""
+        return self._pending_backfill.pop(group_id, [])
 
     def list_awaiting_admin(
         self,

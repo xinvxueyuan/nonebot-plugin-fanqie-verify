@@ -20,6 +20,13 @@ from .actions import (
     send_guide,
     send_welcome,
 )
+from .backfill import (
+    BackfillCandidate,
+    collect_candidates,
+    format_candidate_list,
+    handle_reconnect,
+    run_backfill,
+)
 from .extractor import extract_reading_evidence
 from .flow import (
     admin_decision,
@@ -50,6 +57,7 @@ from .session import SessionRecord, SessionStore, get_session_store
 __all__ = [
     "SUPPORTED_ELEMENTS",
     "AuthorEntry",
+    "BackfillCandidate",
     "ExtractedField",
     "GroupPolicy",
     "Judgment",
@@ -65,12 +73,15 @@ __all__ = [
     "announce_kick_reminder",
     "announce_member_timeout",
     "build_admin_notice",
+    "collect_candidates",
     "extract_reading_evidence",
+    "format_candidate_list",
     "get_member_info",
     "get_policy",
     "get_session_store",
     "handle_admin_decision_timeout",
     "handle_private_submission",
+    "handle_reconnect",
     "handle_reminder",
     "handle_submission",
     "handle_timeout",
@@ -81,6 +92,7 @@ __all__ = [
     "reload_policy",
     "restore_pending_sessions",
     "review_verification",
+    "run_backfill",
     "send_guide",
     "send_welcome",
     "start_verification",

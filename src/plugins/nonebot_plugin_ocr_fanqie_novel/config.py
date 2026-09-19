@@ -46,6 +46,18 @@ class Config(BaseModel):
         fanqie_message_store_cleanup_enabled: 是否在关闭时清理过期记录。
         fanqie_message_store_retention_days: 记录的保留天数。
         fanqie_message_store_record_api_calls: 是否记录平台 API 调用审计。
+        fanqie_backfill_enabled: 是否启用「补验」（把错过入群事件的成员补进
+            验证流程，用于 LLBot 掉线重连后漏掉的成员）。默认 True。
+        fanqie_backfill_default_hours: 补验默认扫描窗口（小时）：只补入群时间在
+            最近该时长内且无验证记录的成员。默认 24。
+        fanqie_backfill_reconnect_mode: LLBot 重连时的补验行为，取值
+            ``notify``（默认，仅在群里提醒管理员有漏验）/ ``auto``（自动补验）/
+            ``off``（什么都不做）。
+        fanqie_backfill_confirm_first: 补验是否先列候选名单等管理员确认。
+            ``False``（默认）直接开启验证；``True`` 只列名单，待管理员发送
+            「补验确认」后执行。
+        fanqie_backfill_max_batch: 单次补验的人数上限（防止一次性给大量成员
+            开启验证造成刷屏）。默认 20。
         fanqie_private_verify_enabled: 是否启用「私聊发图完成验证」通道。
             为 False 时停用私聊图片验证与「验证 <群号>」选群命令，仅保留
             群内验证。默认 True（启用）。
@@ -66,6 +78,11 @@ class Config(BaseModel):
         "（需显示顶部「书评详情」标题、您的书评及「我」徽章），"
         "直接截取手机整个屏幕即可。谢谢配合！"
     )
+    fanqie_backfill_enabled: bool = True
+    fanqie_backfill_default_hours: int = 24
+    fanqie_backfill_reconnect_mode: str = "notify"
+    fanqie_backfill_confirm_first: bool = False
+    fanqie_backfill_max_batch: int = 20
     fanqie_private_verify_enabled: bool = True
     fanqie_response_timeout: int = 600
     fanqie_max_attempts: int = 3

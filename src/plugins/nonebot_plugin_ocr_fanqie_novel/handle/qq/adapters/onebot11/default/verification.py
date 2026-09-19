@@ -24,6 +24,8 @@ from nonebot.params import CommandArg
 
 from ......handle.qq.commands.verification import (
     approve_cmd,
+    backfill_cmd,
+    backfill_confirm_cmd,
     group_admin_change,
     group_ban,
     group_decrease,
@@ -53,6 +55,10 @@ from ......services.verification import (
 
 _SECONDS_PER_HOUR = 3600
 _MINUTES_PER_HOUR = 60
+#: 补验命令里「小时数」与「QQ 号」的分界：小于该值视为小时数。
+_BACKFILL_MIN_QQ = 10000
+#: 补验扫描窗口的允许上限（小时）。
+_BACKFILL_MAX_HOURS = 720
 
 
 def _ensure_aware(dt: datetime | None) -> datetime | None:
@@ -587,6 +593,147 @@ async def on_review(
         + f" {reply}"
     )
     await bot.send_group_msg(group_id=event.group_id, message=message)
+
+
+def _parse_backfill_args(
+    args: Message,
+    event: GroupMessageEvent,
+    default_hours: int,
+) -> tuple[int, list[int]]:
+    """解析补验命令参数：返回 (扫描小时数, 指定成员 QQ 号列表)。
+
+    纯数字参数按大小区分：小于 ``_BACKFILL_MIN_QQ`` 视为小时数，否则视为
+    成员 QQ 号；``@成员`` 一律视为指定成员。
+
+    """
+    hours = max(1, default_hours)
+    targets: list[int] = []
+    for token in args.extract_plain_text().split():
+        if not token.isdigit():
+            continue
+        value = int(token)
+        if value >= _BACKFILL_MIN_QQ:
+            targets.append(value)
+        else:
+            hours = min(max(1, value), _BACKFILL_MAX_HOURS)
+    for segment in event.message:
+        if segment.type != "at":
+            continue
+        qq = segment.data.get("qq")
+        if qq is None or qq == "all":
+            continue
+        try:
+            targets.append(int(qq))
+        except (TypeError, ValueError):
+            continue
+    return hours, targets
+
+
+async def _send_backfill_reply(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+    reply: str,
+) -> None:
+    """发送补验相关回复（引用原命令消息）。"""
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + reply,
+    )
+
+
+@_register(backfill_cmd)
+async def on_backfill(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+) -> None:
+    """补验：把错过入群事件的成员补进验证流程。
+
+    用于机器人掉线期间入群、未收到入群事件的成员。可带小时数窗口
+    （如「补验 48」）或直接指定成员（「补验 @某人」/「补验 10001」）。
+    """
+    from ......core.config import plugin_config
+
+    if not await _is_privileged(bot, event):
+        return
+    if not plugin_config.fanqie_backfill_enabled:
+        await _send_backfill_reply(
+            bot,
+            event,
+            "补验功能已停用（FANQIE_BACKFILL_ENABLED=false）。",
+        )
+        return
+    from ......services.verification import backfill as backfill_module
+
+    hours, targets = _parse_backfill_args(
+        args,
+        event,
+        plugin_config.fanqie_backfill_default_hours,
+    )
+    candidates = await backfill_module.collect_candidates(
+        bot,
+        group_id=event.group_id,
+        hours=hours,
+        targets=targets or None,
+    )
+    if not candidates:
+        await _send_backfill_reply(bot, event, "未发现需要补验的成员。")
+        return
+    if plugin_config.fanqie_backfill_confirm_first:
+        get_session_store().set_pending_backfill(
+            str(event.group_id),
+            [candidate.user_id for candidate in candidates],
+        )
+        reply = (
+            f"{backfill_module.format_candidate_list(event.group_id, candidates)}\n\n"
+            "回复「补验确认」执行补验。"
+        )
+    else:
+        started = await backfill_module.run_backfill(
+            bot,
+            group_id=event.group_id,
+            candidates=candidates,
+        )
+        reply = (
+            f"已为 {started} 名成员开启验证"
+            "（已发送引导并开始计时，未通过将转管理员处理）。"
+        )
+    await _send_backfill_reply(bot, event, reply)
+
+
+@_register(backfill_confirm_cmd)
+async def on_backfill_confirm(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+) -> None:
+    """执行「补验」列出的候选名单（confirm_first 模式）。"""
+    if not await _is_privileged(bot, event):
+        return
+    from ......services.verification import backfill as backfill_module
+
+    user_ids = get_session_store().pop_pending_backfill(str(event.group_id))
+    if not user_ids:
+        await _send_backfill_reply(
+            bot,
+            event,
+            "没有待确认的补验名单，请先发送「补验」。",
+        )
+        return
+    candidates = await backfill_module.collect_candidates(
+        bot,
+        group_id=event.group_id,
+        hours=1,
+        targets=user_ids,
+    )
+    if not candidates:
+        await _send_backfill_reply(bot, event, "名单中的成员已无需补验。")
+        return
+    started = await backfill_module.run_backfill(
+        bot,
+        group_id=event.group_id,
+        candidates=candidates,
+    )
+    await _send_backfill_reply(bot, event, f"已为 {started} 名成员开启验证。")
 
 
 def _extract_target_user(args: Message, event: GroupMessageEvent) -> int | None:
