@@ -23,6 +23,7 @@ from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 
 from ......handle.qq.commands.verification import (
+    _is_sticker,
     approve_cmd,
     backfill_cmd,
     backfill_confirm_cmd,
@@ -102,16 +103,9 @@ def wrapped[T: Callable[..., Awaitable[Any]]](func: T) -> T:
 def _image_url(event: MessageEvent) -> str | None:
     """从群消息中提取首张图片的 URL（排除表情包）；无 URL 时回退到 file。"""
     for segment in event.message:
-        if segment.type != "image":
-            continue
+        if segment.type != "image" or _is_sticker(segment):
+            continue  # 非图片段或表情包，跳过
         data = segment.data
-        if (
-            data.get("emojiId")
-            or data.get("emojiPackageId")
-            or data.get("emoji_id")
-            or data.get("emoji_package_id")
-        ):
-            continue  # 表情包，跳过
         url = data.get("url")
         if url:
             return str(url)

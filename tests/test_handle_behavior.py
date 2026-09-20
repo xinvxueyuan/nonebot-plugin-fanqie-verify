@@ -959,9 +959,9 @@ def test_is_sticker_and_contains_image_exclude_emoji() -> None:
     )
     assert cmd_module._is_sticker(sticker) is True
     assert cmd_module._is_sticker(MessageSegment.image("http://x/a.png")) is False
-    assert (
-        cmd_module._is_sticker(MessageSegment(type="face", data={"id": "1"})) is False
-    )
+    # 语义说明：_is_sticker 判断「是否是表情而非截图」，QQ 系统表情
+    # （face 段）本身也不含截图，故同样返回 True。
+    assert cmd_module._is_sticker(MessageSegment(type="face", data={"id": "1"})) is True
 
     class _FakeEvent:
         def __init__(self, message: Message) -> None:

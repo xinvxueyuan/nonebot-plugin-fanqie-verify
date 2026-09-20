@@ -25,27 +25,49 @@ def _has_pending_session(event: GroupMessageEvent) -> bool:
     )
 
 
-def _is_sticker(segment: MessageSegment) -> bool:
-    """判断 image 段是否为表情包（商城表情转换而来，带 emoji 字段）。
+#: 非图片语义的表情类消息段：QQ 系统表情（face）、商城表情（mface）、
+#: 超级表情（dice/rps）、戳一戳（poke）。这些段不含截图，一律不作为验证材料。
+_NON_IMAGE_SEGMENT_TYPES = frozenset({"face", "mface", "dice", "rps", "poke"})
 
-    LLOneBot/NapCat 里商城表情（mface）转换为 image 类型时，data 会带
-    ``emojiId``/``emojiPackageId``（LLOneBot 驼峰）或 ``emoji_id``/
-    ``emoji_package_id``（NapCat 下划线）；普通图片没有这些字段。
+#: image 段中表示「普通图片」的 subType 取值。QQ 的 bizType 普通图片为 0，
+#: 其余取值代表特殊来源（用户收藏的自定义表情包、闪照等），不能当验证截图。
+_NORMAL_IMAGE_SUBTYPES = frozenset({0, "0", "", None})
+
+
+def _is_sticker(segment: MessageSegment) -> bool:
+    """判断消息段是否为「表情包」等非截图内容。
+
+    覆盖 LLBot（NTQQ）实际产生的三类形态：
+
+    1. **独立表情段**：``mface``（商城表情）、``face``（系统表情）等，
+       段类型本身就不是 image；
+    2. **image 段带 emoji 字段**：LLOneBot/部分版本把商城表情转成 image 时
+       会带 ``emojiId``/``emojiPackageId``（驼峰）或 ``emoji_id``/
+       ``emoji_package_id``（下划线）；
+    3. **image 段 subType 非 0**：LLBot 把 QQ 的 ``bizType`` 原样放进
+       ``subType``（LLBot 源码注明 ``bizType: 10/20=image, 11/21=video,
+       12/22=voice``）。**用户收藏的自定义表情包（customFace）走 picElement
+       路径，同样产出一个不带 emoji 字段的 image 段**，只能靠 subType 区分
+       ——普通截图实测恒为 0。
 
     """
+    if segment.type in _NON_IMAGE_SEGMENT_TYPES:
+        return True
     if segment.type != "image":
         return False
     data = segment.data
-    return bool(
+    if (
         data.get("emojiId")
         or data.get("emojiPackageId")
         or data.get("emoji_id")
         or data.get("emoji_package_id")
-    )
+    ):
+        return True
+    return data.get("subType") not in _NORMAL_IMAGE_SUBTYPES
 
 
 def _contains_image(event: MessageEvent) -> bool:
-    """消息是否包含图片消息段（排除表情包/商城表情）。"""
+    """消息是否包含可作验证截图的图片（排除表情包等非截图内容）。"""
     return any(
         segment.type == "image" and not _is_sticker(segment)
         for segment in event.message
