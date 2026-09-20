@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
     admin_decision,
     flow as flow_module,
     get_session_store,
@@ -67,7 +67,7 @@ class FakeBot:
 
 @pytest.fixture(autouse=True)
 def _fresh_store() -> Generator[None]:
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         session,
     )
 
@@ -82,10 +82,10 @@ def _fresh_store() -> Generator[None]:
 @pytest.fixture(autouse=True)
 def _lenient_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     """默认让测试群 123 通过策略检查（配置作者节点，作者不在白名单约束）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -123,10 +123,10 @@ async def test_start_verification_skips_non_monitored_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """群不在监控范围（未配置群节点）时应跳过验证，不建会话不发引导。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -253,7 +253,7 @@ async def test_ocr_disabled_skips_ocr_and_uses_vision(
     """FANQIE_OCR_ENABLED=False 时应跳过 OCR，直接由视觉模型判定。"""
     from unittest.mock import AsyncMock
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     recognize_calls: list[str] = []
 
@@ -292,7 +292,7 @@ async def test_ocr_disabled_vision_unavailable_counts_retry(
     """OCR 停用时视觉模型不可用，应按识别失败计次（消耗重试次数）。"""
     from unittest.mock import AsyncMock
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
     monkeypatch.setattr(plugin_config, "fanqie_max_attempts", 3)
@@ -377,11 +377,11 @@ async def test_handle_submission_reject_notifies_admin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """判定拒绝应结束会话并私信管理员决策（不禁言）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -439,10 +439,10 @@ async def test_handle_submission_policy_rejects_missing_element(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """策略要求指定元素但截图缺少时应拒绝。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -492,10 +492,10 @@ async def test_handle_submission_policy_rejects_author(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """作者不在白名单时应拒绝。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -546,7 +546,7 @@ async def test_handle_timeout_notifies_and_ends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """超时应转入待管理员决策并私信通知（不自动踢出）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_admin_ids", {90001})
     monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
@@ -655,7 +655,7 @@ async def test_handle_timeout_member_already_left(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """成员已退群时，超时处理应跳过动作并结束会话。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_notify_admin", False)
 
@@ -736,7 +736,7 @@ async def test_await_admin_schedules_decision_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """转入待管理员决策后应设置 16h 截止并保留会话。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_admin_decision_timeout", 57600)
     bot: Any = FakeBot()
@@ -822,8 +822,8 @@ async def test_restore_pending_sessions(
     from datetime import UTC, datetime, timedelta
     from types import SimpleNamespace
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         session as session_module,
     )
 
@@ -891,7 +891,7 @@ async def test_restore_pending_sessions(
 
 def _ocr_result_with_evidence() -> Any:
     """构造能提取出有效证据的书评详情页 OCR 结果（本人发布）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
         OCRPage,
         OCRResult,
         OCRTextLine,
@@ -921,7 +921,7 @@ def _ocr_result_with_evidence() -> Any:
 
 def _ocr_result_with_author(author: str) -> Any:
     """构造带指定作者的书评详情页 OCR 结果。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
         OCRPage,
         OCRResult,
         OCRTextLine,
@@ -951,7 +951,7 @@ def _ocr_result_with_author(author: str) -> Any:
 
 def _ocr_result_empty() -> Any:
     """构造无有效信息的 OCR 结果（无「我」徽章）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
         OCRPage,
         OCRResult,
         OCRTextLine,
@@ -965,7 +965,7 @@ def _ocr_result_empty() -> Any:
 
 def _ocr_result_other_review() -> Any:
     """构造他人书评的 OCR 结果（无「我」徽章）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
         OCRPage,
         OCRResult,
         OCRTextLine,
@@ -1029,7 +1029,7 @@ async def test_review_self_limited_by_max_times(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """普通成员重审次数达上限后被拒绝。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_review_max_times", 2)
     bot: Any = FakeBot()
@@ -1088,7 +1088,7 @@ async def test_handle_timeout_announces_member(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """成员响应超时应先在群内 @ 成员提示已超时、可重审。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_admin_ids", {90001})
     monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
@@ -1229,7 +1229,7 @@ async def test_flow_records_timeout_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """响应超时应记录 verify.timeout 事件。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_admin_ids", {90001})
     monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
@@ -1284,7 +1284,7 @@ async def test_private_submission_single_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """私聊验证：恰有一个待验证群时直接验证。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         handle_private_submission,
     )
 
@@ -1311,7 +1311,7 @@ async def test_private_submission_no_waiting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """私聊验证：无待验证会话时提示。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         handle_private_submission,
     )
 
@@ -1334,7 +1334,7 @@ async def test_private_submission_multi_group_asks_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """私聊验证：多群待验证且未选群时返回群列表供选择。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         handle_private_submission,
     )
 
@@ -1377,7 +1377,7 @@ async def test_private_submission_multi_group_with_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """私聊验证：多群待验证且已选目标群时验证选定群。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         handle_private_submission,
     )
 

@@ -21,10 +21,10 @@ from typing import Any
 from nonebug import App
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.adapters.onebot11.default import (
+from src.plugins.nonebot_plugin_fanqie_verify.handle.qq.adapters.onebot11.default import (
     verification as adapter_module,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.commands import (
+from src.plugins.nonebot_plugin_fanqie_verify.handle.qq.commands import (
     verification as cmd_module,
 )
 
@@ -37,7 +37,7 @@ _STORE_KEY = (str(_GROUP_ID), "10001")
 @pytest.fixture(autouse=True)
 def _fresh_store() -> Generator[None]:
     """每个测试使用独立的会话存储。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         session as session_module,
     )
 
@@ -50,7 +50,7 @@ def _fresh_store() -> Generator[None]:
 
 
 def _new_store() -> Any:
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.session import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.session import (
         SessionStore,
     )
 
@@ -294,7 +294,7 @@ async def test_extend_cmd_extends_all_awaiting(app: App) -> None:
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -345,7 +345,7 @@ async def test_extend_cmd_extends_specified_member(app: App) -> None:
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -442,8 +442,8 @@ async def test_extend_cmd_disabled_switch(
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -491,7 +491,7 @@ async def test_extend_cmd_caps_and_reports(app: App) -> None:
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 

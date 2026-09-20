@@ -19,10 +19,10 @@ from typing import Any
 from nonebug import App
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.adapters.onebot11.default import (
+from src.plugins.nonebot_plugin_fanqie_verify.handle.qq.adapters.onebot11.default import (
     verification as adapter_module,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.commands import (
+from src.plugins.nonebot_plugin_fanqie_verify.handle.qq.commands import (
     verification as cmd_module,
 )
 
@@ -195,7 +195,7 @@ async def test_custom_face_does_not_trigger_verification(app: App) -> None:
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 

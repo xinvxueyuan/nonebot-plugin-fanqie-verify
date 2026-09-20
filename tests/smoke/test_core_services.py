@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
     OCRClient,
     OCRPage,
     OCRResult,
     OCRTextLine,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
     extract_reading_evidence,
     judge_evidence,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
     AuthorEntry,
     GroupPolicy,
     VerificationPolicy,
@@ -54,7 +54,7 @@ def _shelf_result() -> OCRResult:
 
 def test_ocr_models_normalize() -> None:
     """OCR 客户端模型名规范化应工作。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr.client import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr.client import (
         _normalize_model,
     )
 
@@ -63,7 +63,7 @@ def test_ocr_models_normalize() -> None:
 
 def test_core_services_initializable() -> None:
     """核心服务单例应能初始化。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 

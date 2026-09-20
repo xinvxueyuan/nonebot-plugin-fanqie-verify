@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import vision
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification import vision
 
 
 class TestParseContent:
@@ -204,7 +204,7 @@ class TestVisionFallback:
                 "deepseek-v4-flash-vision-exp",
             ),
             patch(
-                "src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.vision.AsyncOpenAI",
+                "src.plugins.nonebot_plugin_fanqie_verify.services.verification.vision.AsyncOpenAI",
                 return_value=client,
             ),
         ):
@@ -233,7 +233,7 @@ class TestVisionFallback:
                 "deepseek-v4-flash-vision-exp",
             ),
             patch(
-                "src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.vision.AsyncOpenAI",
+                "src.plugins.nonebot_plugin_fanqie_verify.services.verification.vision.AsyncOpenAI",
                 side_effect=vision.OpenAIError("boom"),
             ),
         ):
@@ -259,7 +259,7 @@ class TestVisionFallback:
                 "deepseek-v4-flash-vision-exp",
             ),
             patch(
-                "src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.vision.AsyncOpenAI",
+                "src.plugins.nonebot_plugin_fanqie_verify.services.verification.vision.AsyncOpenAI",
                 return_value=client,
             ),
         ):

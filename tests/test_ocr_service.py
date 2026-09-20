@@ -11,7 +11,7 @@ import pytest
 from pytest import MonkeyPatch
 import respx
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
     OCRClient,
     OCRError,
     OCRInvalidResponseError,
@@ -21,12 +21,12 @@ from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
     get_ocr_client,
     recognize_file,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr.client import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.ocr.client import (
     _layout_result_to_page,
     _normalize_model,
     _pruned_result_to_page,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr.service import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.ocr.service import (
     _reset_client,
 )
 
@@ -213,7 +213,7 @@ async def test_recognize_pipeline_uses_file_path(
     fake.result = FakeOCRResult([FakePage(_raw_pruned_result())])
 
     monkeypatch.setattr(
-        "src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr.service._client",
+        "src.plugins.nonebot_plugin_fanqie_verify.services.ocr.service._client",
         ocr_client,
     )
     result = await recognize_file(_SCREENSHOT_SELF_REVIEW)
@@ -266,7 +266,7 @@ async def test_map_exception_raises_plugin_error() -> None:
     """Httpx 网络异常应被映射为插件自定义异常。"""
     from httpx import ConnectError
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr.client import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr.client import (
         _map_http_error,
     )
 
@@ -277,13 +277,13 @@ async def test_map_exception_raises_plugin_error() -> None:
 @pytest.mark.asyncio
 async def test_map_status_error_categories() -> None:
     """HTTP 状态码应映射为对应异常类别。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
         OCRAuthError,
         OCRBadRequestError,
         OCRRateLimitError,
         OCRServiceUnavailableError,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr.client import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr.client import (
         _map_status_error,
     )
 
@@ -298,7 +298,7 @@ async def test_map_status_error_categories() -> None:
 @pytest.mark.asyncio
 async def test_no_token_raises_not_configured(monkeypatch: MonkeyPatch) -> None:
     """未配置 token 时应抛出 OCRNotConfiguredError。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_ocr_api_token", "")
     client = OCRClient()
@@ -311,7 +311,7 @@ async def test_http_pipeline_with_respx(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """模拟网络：验证提交 → 轮询 → jsonl 解析的完整 HTTP 链路。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_ocr_api_token", "test-token")
     monkeypatch.setattr(
@@ -378,7 +378,7 @@ def test_get_ocr_client_singleton() -> None:
 
 def test_result_text_joins_lines() -> None:
     """OCRResult.text 应按顺序拼接所有文本行。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
         OCRPage,
         OCRResult,
     )
@@ -399,7 +399,7 @@ def test_result_text_joins_lines() -> None:
 
 def _has_ocr_credentials() -> bool:
     """是否配置了云端 OCR 凭据。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     return bool(
         plugin_config.fanqie_ocr_api_token or os.environ.get("PADDLEOCR_ACCESS_TOKEN")

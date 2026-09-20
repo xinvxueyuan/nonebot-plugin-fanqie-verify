@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel import __plugin_meta__
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.config import Config
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.commands import (
+from src.plugins.nonebot_plugin_fanqie_verify import __plugin_meta__
+from src.plugins.nonebot_plugin_fanqie_verify.config import Config
+from src.plugins.nonebot_plugin_fanqie_verify.handle.qq.commands import (
     verification as cmd_module,
 )
 
@@ -51,7 +51,7 @@ def test_verification_matchers_registered() -> None:
 
 def test_policy_toml_generates(tmp_path: Path) -> None:
     """默认策略 TOML 应能生成并加载。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         load_policy,
     )
 

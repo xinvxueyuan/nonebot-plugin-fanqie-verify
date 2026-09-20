@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
     ExtractedField,
     ReadingEvidence,
     judge_evidence,

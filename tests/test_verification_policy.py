@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
     ExtractedField,
     PolicyConfigError,
     ReadingEvidence,
     load_policy,
     reload_policy,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
     SUPPORTED_ELEMENTS,
     AuthorEntry,
     GroupPolicy,

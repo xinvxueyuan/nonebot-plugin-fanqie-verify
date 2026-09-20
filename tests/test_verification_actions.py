@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.actions import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification.actions import (
     MemberInfo,
     get_member_info,
     kick_member,
@@ -108,13 +108,13 @@ def test_decorate_notice_includes_group_authors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """管理员通知应附加群作者白名单与群内决策指引。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.actions import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.actions import (
         _decorate_notice,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -147,13 +147,13 @@ def test_decorate_notice_includes_group_authors(
 
 def test_decorate_notice_unconfigured_group() -> None:
     """群未配置作者白名单时提示未配置。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.actions import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.actions import (
         _decorate_notice,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         VerificationPolicy,
     )
 
@@ -169,13 +169,13 @@ def test_decorate_notice_unconfigured_group() -> None:
 
 def test_welcome_message_custom_group(monkeypatch: pytest.MonkeyPatch) -> None:
     """群节点配了 welcome_message 时优先取自定义文案。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.actions import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.actions import (
         _welcome_message,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         GroupPolicy,
         VerificationPolicy,
     )
@@ -195,16 +195,16 @@ def test_welcome_message_custom_group(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_welcome_message_fallback_global(monkeypatch: pytest.MonkeyPatch) -> None:
     """群节点未配 welcome_message（或群不在策略里）时回退全局默认。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import (
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import (
         plugin_config,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.actions import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.actions import (
         _welcome_message,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         GroupPolicy,
         VerificationPolicy,
     )
@@ -228,7 +228,7 @@ def test_with_reply_prepends_reply_segment() -> None:
     """_with_reply 在给定消息 id 时前置引用段，为空时原样返回。"""
     from nonebot.adapters.onebot.v11.message import Message, MessageSegment
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         actions as actions_module,
     )
 
@@ -247,7 +247,7 @@ async def test_announce_member_timeout_replies_only_in_group() -> None:
     """超时通报：群消息带引用段，私发副本不带引用（私聊无引用语义）。"""
     from nonebot.adapters.onebot.v11.message import Message
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         actions as actions_module,
     )
 
@@ -286,7 +286,7 @@ async def test_send_welcome_without_reply_id_is_plain() -> None:
     """未传 reply_message_id 时欢迎消息不带引用段（可回退）。"""
     from nonebot.adapters.onebot.v11.message import Message
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         actions as actions_module,
     )
 

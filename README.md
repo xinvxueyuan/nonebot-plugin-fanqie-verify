@@ -1,4 +1,4 @@
-# ocr-fanqie-novel
+# nonebot-plugin-fanqie-verify
 
 番茄读书群入群验证插件：新成员入群后要求发送**自己发布的番茄小说书评详情页截图**，
 通过 PaddleOCR（PP-OCRv6）云端 API 识别书评信息，校验「我」徽章、书名、作者后
@@ -127,7 +127,7 @@
 
 ### 放行策略 TOML（FR4）
 
-首次运行后生成在 `config/nonebot_plugin_ocr_fanqie_novel/verification_policy.toml`。
+首次运行后生成在 `config/nonebot_plugin_fanqie_verify/verification_policy.toml`。
 策略**以群为节点**组织：每个群下可配置多个作者，每个作者下可配置多个作品（书名）。
 
 ```toml
@@ -198,7 +198,7 @@ task test    # pytest
 task fix     # 自动修复 lint/格式
 ```
 
-插件源码位于 `src/plugins/nonebot_plugin_ocr_fanqie_novel/`。
+插件源码位于 `src/plugins/nonebot_plugin_fanqie_verify/`。
 
 ## 文档
 

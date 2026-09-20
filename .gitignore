@@ -1,6 +1,6 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
-# Cleaned for ocr-fanqie-novel: NoneBot2 + uv plugin project.
+# Cleaned for nonebot-plugin-fanqie-verify: NoneBot2 + uv plugin project.
 # Project does NOT use: Django, Flask, Scrapy, Sphinx, Jupyter, pyenv, pipenv,
 # PEP 582, Celery, SageMath, Spyder, Rope, mkdocs, Pyre, pytype, PDM,
 # PyInstaller. Removed their entries when re-applying the upstream template.

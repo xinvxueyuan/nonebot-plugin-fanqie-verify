@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
     backfill,
 )
 
@@ -141,7 +141,7 @@ async def test_run_backfill_starts_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """run_backfill 逐个调用正常入群流程开启验证。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         flow,
     )
 
@@ -175,7 +175,7 @@ async def test_run_backfill_respects_max_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """单次补验人数不超过 max_batch（防刷屏）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         flow,
     )
 
@@ -208,7 +208,7 @@ async def test_handle_reconnect_off_does_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """重连模式 off 时不查群、不发消息。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_backfill_enabled", True)
     monkeypatch.setattr(plugin_config, "fanqie_backfill_reconnect_mode", "off")
@@ -224,7 +224,7 @@ async def test_handle_reconnect_disabled_does_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """补验总开关关闭时即使模式为 auto 也不处理。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_backfill_enabled", False)
     monkeypatch.setattr(plugin_config, "fanqie_backfill_reconnect_mode", "auto")
@@ -240,8 +240,8 @@ async def test_handle_reconnect_notify_only_warns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """重连模式 notify（默认）只群内提醒管理员，不开启验证。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         flow,
     )
 
@@ -272,8 +272,8 @@ async def test_handle_reconnect_auto_backfills(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """重连模式 auto 自动开启验证并群内通报。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         flow,
     )
 
@@ -308,7 +308,7 @@ async def test_handle_reconnect_no_candidates_silent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """无漏验成员时不发任何消息（避免每次重连都刷屏）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_backfill_enabled", True)
     monkeypatch.setattr(plugin_config, "fanqie_backfill_reconnect_mode", "notify")

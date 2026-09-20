@@ -5,8 +5,8 @@ from __future__ import annotations
 from nonebot import get_plugin_config
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel import config as plugin_config
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.config import Config
+from src.plugins.nonebot_plugin_fanqie_verify import config as plugin_config
+from src.plugins.nonebot_plugin_fanqie_verify.config import Config
 
 
 def test_plugin_config_defaults() -> None:

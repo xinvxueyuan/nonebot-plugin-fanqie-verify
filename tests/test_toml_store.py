@@ -8,7 +8,7 @@ import aiofiles
 import pytest
 import rtoml
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.database.toml_store import (
+from src.plugins.nonebot_plugin_fanqie_verify.database.toml_store import (
     InvalidTOMLRootTypeError,
     TOMLFileReadError,
     TOMLSerializationError,

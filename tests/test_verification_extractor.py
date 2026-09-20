@@ -12,12 +12,12 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
     OCRPage,
     OCRResult,
     OCRTextLine,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
     ReadingEvidence,
     extract_reading_evidence,
 )

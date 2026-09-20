@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 revision: str = "1f2e3d4c5b6a"
 down_revision: str | Sequence[str] | None = None
-branch_labels: str | Sequence[str] | None = ("nonebot_plugin_ocr_fanqie_novel",)
+branch_labels: str | Sequence[str] | None = ("nonebot_plugin_fanqie_verify",)
 depends_on: str | Sequence[str] | None = None
 
 
@@ -49,7 +49,7 @@ def upgrade(name: str = "") -> None:
             "user_id",
             name="uq_fanqie_verification_session_identity",
         ),
-        info={"bind_key": "nonebot_plugin_ocr_fanqie_novel"},
+        info={"bind_key": "nonebot_plugin_fanqie_verify"},
     )
     op.create_index(
         op.f("ix_fanqie_verification_sessions_platform_id"),
@@ -161,7 +161,7 @@ def upgrade(name: str = "") -> None:
             "message_id",
             name="uq_fanqie_message_record_identity",
         ),
-        info={"bind_key": "nonebot_plugin_ocr_fanqie_novel"},
+        info={"bind_key": "nonebot_plugin_fanqie_verify"},
     )
     op.create_index(
         op.f("ix_fanqie_message_records_platform_id"),
@@ -263,7 +263,7 @@ def upgrade(name: str = "") -> None:
         sa.Column("exception_summary", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_fanqie_audit_records")),
-        info={"bind_key": "nonebot_plugin_ocr_fanqie_novel"},
+        info={"bind_key": "nonebot_plugin_fanqie_verify"},
     )
     op.create_index(
         op.f("ix_fanqie_audit_records_platform_id"),
@@ -328,7 +328,7 @@ def upgrade(name: str = "") -> None:
         sa.Column("detail", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_fanqie_verification_events")),
-        info={"bind_key": "nonebot_plugin_ocr_fanqie_novel"},
+        info={"bind_key": "nonebot_plugin_fanqie_verify"},
     )
     op.create_index(
         op.f("ix_fanqie_verification_events_platform_id"),

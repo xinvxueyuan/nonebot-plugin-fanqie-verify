@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .models import ReadingEvidence
 
-_PLUGIN_NAME = "nonebot_plugin_ocr_fanqie_novel"
+_PLUGIN_NAME = "nonebot_plugin_fanqie_verify"
 _POLICY_FILENAME = "verification_policy.toml"
 
 # ReadingEvidence 中可参与放行判断的字段。

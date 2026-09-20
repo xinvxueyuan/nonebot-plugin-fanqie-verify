@@ -16,7 +16,7 @@ from typing import Any
 from nonebug import App
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.commands import (
+from src.plugins.nonebot_plugin_fanqie_verify.handle.qq.commands import (
     verification as cmd_module,
 )
 
@@ -36,7 +36,7 @@ _MEMBER_INFO = {
 @pytest.fixture(autouse=True)
 def _cleanup_session_store() -> Generator[None]:
     """每个行为测试后重置会话存储与策略缓存，避免状态泄漏。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
         session as session_module,
     )
@@ -54,10 +54,10 @@ def _cleanup_session_store() -> Generator[None]:
 @pytest.fixture(autouse=True)
 def _default_monitored_group() -> Generator[None]:
     """默认让群 _GROUP_ID 处于监控范围（配置作者节点）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -85,7 +85,7 @@ async def _drain_timeout_tasks() -> AsyncGenerator[None]:
     """排空会话存储的超时任务，避免已取消任务在 teardown 时产生警告。"""
     import asyncio
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -105,7 +105,7 @@ async def _drain_timeout_tasks() -> AsyncGenerator[None]:
 @pytest.fixture(autouse=True)
 def _quiet_background_tasks() -> Generator[None]:
     """行为测试不持久化消息存储，避免后台 DB 任务未等待。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     enabled_before = plugin_config.fanqie_message_store_enabled
     plugin_config.fanqie_message_store_enabled = False
@@ -132,7 +132,7 @@ def _ban_event(**overrides: Any) -> dict[str, Any]:
 
 
 def _start_session() -> None:
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -168,7 +168,7 @@ async def test_group_increase_sends_guide(app: App) -> None:
             operator_id=1,
             user_id=_USER_ID,
         )
-        from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import (
+        from src.plugins.nonebot_plugin_fanqie_verify.core.config import (
             plugin_config,
         )
 
@@ -193,7 +193,7 @@ async def test_group_increase_sends_guide(app: App) -> None:
         )
         ctx.receive_event(bot, event)
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -207,10 +207,10 @@ async def test_group_increase_not_monitored_skips(app: App) -> None:
     """群不在监控白名单时应跳过验证，不发引导。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, GroupIncreaseNoticeEvent
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -247,7 +247,7 @@ async def test_group_ban_syncs_muted_state(app: App) -> None:
     """群禁言事件应同步会话禁言状态。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, GroupBanNoticeEvent
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -268,7 +268,7 @@ async def test_group_ban_lift_updates_state(app: App) -> None:
     """解除禁言事件应更新会话状态。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, GroupBanNoticeEvent
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -291,7 +291,7 @@ async def test_group_admin_change_approves_waiting(app: App) -> None:
     """待验证成员被设为管理员应直接放行。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, GroupAdminNoticeEvent
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -320,7 +320,7 @@ async def test_group_decrease_clears_session(app: App) -> None:
     """成员退群应清除验证会话。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, GroupDecreaseNoticeEvent
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -348,7 +348,7 @@ async def test_group_decrease_kick_me_clears_group(app: App) -> None:
     """机器人被移出群应清理该群全部会话。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, GroupDecreaseNoticeEvent
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -416,16 +416,16 @@ async def test_image_submission_handles_pending_member_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """待验证成员发送图片：in-handler 检查应通过并走完验证流程。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.adapters.onebot11.default import (
+    from src.plugins.nonebot_plugin_fanqie_verify.handle.qq.adapters.onebot11.default import (
         verification as handle_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         actions,
         flow as flow_module,
         get_session_store,
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -444,7 +444,7 @@ async def test_image_submission_handles_pending_member_image(
 
     async def fake_recognize(url: str, *, models: list[str] | None = None) -> Any:
         _ = (url, models)
-        from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.ocr import (
+        from src.plugins.nonebot_plugin_fanqie_verify.services.ocr import (
             OCRPage,
             OCRResult,
             OCRTextLine,
@@ -551,7 +551,7 @@ async def test_kick_cmd_superuser_runs(
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         actions,
         get_session_store,
     )
@@ -623,7 +623,7 @@ async def test_pending_list_cmd_lists_awaiting_admin(app: App) -> None:
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -727,7 +727,7 @@ async def test_processing_list_cmd_lists_waiting(app: App) -> None:
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -791,7 +791,7 @@ async def test_approve_cmd_superuser_direct_approve(app: App) -> None:
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -883,10 +883,10 @@ async def test_whitelist_cmd_shows_authors(app: App) -> None:
         MessageSegment,
     )
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         policy as policy_module,
     )
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         AuthorEntry,
         GroupPolicy,
         VerificationPolicy,
@@ -1005,8 +1005,8 @@ def _patch_backfill(
     同时把重连模式置为 off：``on_bot_connect`` 的重连补验会抢先调用群 API，
     消费掉测试为 handler 声明的 API 期望队列。
     """
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         backfill as backfill_module,
     )
 
@@ -1043,8 +1043,8 @@ def _patch_backfill(
 
 def _patch_empty_backfill(monkeypatch: pytest.MonkeyPatch) -> None:
     """替换补验扫描为「无候选」（用于确认命令的边界测试）。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.core.config import plugin_config
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         backfill as backfill_module,
     )
 
@@ -1071,7 +1071,7 @@ async def test_backfill_cmd_starts_verification(
     """补验命令（默认直接模式）应把候选成员纳入验证流程并回复数量。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, MessageSegment
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -1103,7 +1103,7 @@ async def test_backfill_cmd_confirm_first_lists_and_stores(
     """confirm_first 模式只列候选名单并暂存，不开启验证。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, MessageSegment
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -1136,7 +1136,7 @@ async def test_backfill_confirm_cmd_executes_pending(
     """补验确认命令应执行暂存的候选名单。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, MessageSegment
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -1167,7 +1167,7 @@ async def test_backfill_confirm_cmd_without_pending(
     """没有待确认名单时提示先发送补验。"""
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, MessageSegment
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         get_session_store,
     )
 
@@ -1192,7 +1192,7 @@ def test_parse_backfill_args_minutes_and_qq() -> None:
     """补验参数解析：小数视为小时数，大数视为 QQ 号，@ 视为指定成员。"""
     from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.handle.qq.adapters.onebot11.default import (
+    from src.plugins.nonebot_plugin_fanqie_verify.handle.qq.adapters.onebot11.default import (
         verification as adapter_module,
     )
 

@@ -33,7 +33,7 @@ jobs:
       - name: 🧪 Run tests
         run: |
           uv sync --all-groups
-          uv run pytest -m "not smoke" -o addopts="-q --cov=src/plugins/nonebot_plugin_ocr_fanqie_novel --cov-branch --cov-report=term-missing"
+          uv run pytest -m "not smoke" -o addopts="-q --cov=src/plugins/nonebot_plugin_fanqie_verify --cov-branch --cov-report=term-missing"
 
       - name: 📦 Build package
         run: uv build

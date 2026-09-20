@@ -16,10 +16,10 @@ from sqlalchemy.pool import StaticPool
 
 require("nonebot_plugin_orm")
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.database.models import (
+from src.plugins.nonebot_plugin_fanqie_verify.database.models import (
     VerificationSession,
 )
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.database.orm_crud import (
+from src.plugins.nonebot_plugin_fanqie_verify.database.orm_crud import (
     count,
     create,
     delete,
@@ -206,7 +206,7 @@ async def test_list_items_ordering(session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_list_pending_sessions_filters_status(session: AsyncSession) -> None:
     """list_pending_sessions 应只返回 waiting 与 awaiting_admin。"""
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.repositories import (
+    from src.plugins.nonebot_plugin_fanqie_verify.repositories import (
         message_store as repo,
     )
 

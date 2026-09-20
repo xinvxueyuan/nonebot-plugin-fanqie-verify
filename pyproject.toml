@@ -1,5 +1,5 @@
 [project]
-name = "ocr-fanqie-novel"
+name = "nonebot-plugin-fanqie-verify"
 version = "0.3.0"
 description = "番茄读书群入群验证插件：新成员入群后要求发送自己发布的番茄小说书评详情页截图，OCR 识别后自动放行或通知管理员决策"
 keywords = ["nonebot2", "nonebot", "bot", "ocr", "paddleocr", "group-management"]
@@ -32,8 +32,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/xinvxueyuan/ocr-fanqie-novel"
-Repository = "https://github.com/xinvxueyuan/ocr-fanqie-novel"
+Homepage = "https://github.com/xinvxueyuan/nonebot-plugin-fanqie-verify"
+Repository = "https://github.com/xinvxueyuan/nonebot-plugin-fanqie-verify"
 
 [dependency-groups]
 dev = [
@@ -190,64 +190,64 @@ allowed-confusables = [
     "D103",    # missing-public-function-docstring
 ]
 # nonebot2 require() must precede cross-plugin imports at module level
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/database/orm_crud/*.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/database/orm_crud/*.py" = [
     "E402",
     "TRY003",
     "TC003",
     "PLR0913", # parameter-heavy generic CRUD functions
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/database/models/*.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/database/models/*.py" = [
     "E402",
     "TC003",
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/hooks/handlers/*.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/hooks/handlers/*.py" = [
     "TC002",
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/start/startup.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/start/startup.py" = [
     "E402",
     "BLE001",
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/core/async_utils.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/core/async_utils.py" = [
     "TC003",  # runtime stdlib imports needed by NoneBot
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/database/toml_store/_helpers.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/database/toml_store/_helpers.py" = [
     "TRY003", # raise-vanilla-args for serialization errors
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/hooks/adapters.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/hooks/adapters.py" = [
     "C901",   # complex normalization logic
     "PLR0911", # too-many-return-statements in normalization helpers
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/repositories/message_store.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/repositories/message_store.py" = [
     "PLR0913", # parameter-heavy write/audit APIs
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/services/ocr/*.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/services/ocr/*.py" = [
     "PLW0603",  # module-level singletons (get_ocr_client caching pattern)
     "TRY003",   # descriptive OCR error messages passed to custom exceptions
     "ASYNC240", # temp-file cleanup uses pathlib in async context
     "TC001",    # TYPE_CHECKING re-exports used as public annotations
     "TC003",    # runtime stdlib imports needed for temp-file handling
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/services/verification/rules.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/services/verification/rules.py" = [
     "PLW0603",  # module-level rules cache singleton
     "TRY003",   # descriptive rules config error messages
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/services/verification/policy.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/services/verification/policy.py" = [
     "PLW0603",  # module-level policy cache singleton
     "TRY003",   # descriptive policy config error messages
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/services/verification/session.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/services/verification/session.py" = [
     "PLW0603",  # module-level session store singleton
     "TRY003",   # descriptive session error messages
     "BLE001",   # timeout callback exceptions are logged, never propagated
     "PLR0913",  # start() keyword-only identity fields
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/services/verification/actions.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/services/verification/actions.py" = [
     "PLR0913",  # build_admin_notice keyword-only evidence fields
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/services/verification/flow.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/services/verification/flow.py" = [
     "PLR0911",  # verification flow branches into many distinct terminal paths
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/handle/qq/adapters/onebot11/default/verification.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/handle/qq/adapters/onebot11/default/verification.py" = [
     "TC001",  # real runtime annotations required for NoneBot signature resolution
     "TC002",  # (no future annotations in handler modules, per reference project)
     "TC003",
@@ -255,7 +255,7 @@ allowed-confusables = [
     "BLE001",  # handler exceptions are logged, never propagated
     "PLR0913", # target_user_id + bot + event identity args
 ]
-"src/plugins/nonebot_plugin_ocr_fanqie_novel/handle/qq/commands/verification.py" = [
+"src/plugins/nonebot_plugin_fanqie_verify/handle/qq/commands/verification.py" = [
     "TC001",  # rule/permission signatures need real runtime annotation names
     "TC002",  # NoneBot evaluates rule function annotations against module globals
     "TC003",
@@ -274,7 +274,7 @@ multiline-quotes = "double"
 docstring-quotes = "double"
 
 [tool.ruff.lint.isort]
-known-first-party = ["nonebot_plugin_ocr_fanqie_novel"]
+known-first-party = ["nonebot_plugin_fanqie_verify"]
 force-sort-within-sections = true
 combine-as-imports = true
 
@@ -328,7 +328,7 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 pythonpath = [".", "src"]
 testpaths = ["tests"]
-addopts = "--import-mode=importlib --strict-markers --strict-config --cov=src/plugins/nonebot_plugin_ocr_fanqie_novel --cov-branch --cov-report=term-missing"
+addopts = "--import-mode=importlib --strict-markers --strict-config --cov=src/plugins/nonebot_plugin_fanqie_verify --cov-branch --cov-report=term-missing"
 filterwarnings = [
     "error",
     # NoneBot's ForwardRef._evaluate doesn't pass type_params (third-party)
@@ -344,7 +344,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src/plugins/nonebot_plugin_ocr_fanqie_novel"]
+source = ["src/plugins/nonebot_plugin_fanqie_verify"]
 branch = true
 
 [tool.coverage.report]
@@ -359,5 +359,5 @@ requires = ["uv_build>=0.11.8,<0.13"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["nonebot_plugin_ocr_fanqie_novel"]
+module-name = ["nonebot_plugin_fanqie_verify"]
 module-root = "src/plugins"

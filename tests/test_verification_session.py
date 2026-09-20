@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.session import (
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification.session import (
     SessionRecord,
     SessionStore,
     get_session_store,
@@ -17,7 +17,7 @@ from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.session i
 
 @pytest.fixture(autouse=True)
 def _fresh_store() -> Generator[None]:
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
         session,
     )
 

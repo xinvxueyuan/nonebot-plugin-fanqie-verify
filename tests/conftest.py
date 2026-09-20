@@ -70,7 +70,7 @@ def _fresh_config_files() -> None:
     """每个测试前删除策略文件，保证从代码默认值重新生成。"""
     from nonebot_plugin_localstore import get_config_file
 
-    from src.plugins.nonebot_plugin_ocr_fanqie_novel.services.verification.policy import (
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         _PLUGIN_NAME,
         _POLICY_FILENAME,
     )
