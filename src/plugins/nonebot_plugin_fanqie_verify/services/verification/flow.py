@@ -785,8 +785,19 @@ async def _increment_retry(
     user_id: int,
     *,
     kind: str,
+    evidence: ReadingEvidence | None = None,
 ) -> str:
-    """识别失败：计数 +1，达上限则踢出（FR8）。"""
+    """识别/判定失败：重试计数 +1；达上限则转入管理员决策（FR8）。
+
+    Args:
+        bot: 当前 Bot 实例。
+        group_id: 群号。
+        user_id: 成员 QQ 号。
+        kind: 失败类别，用于拼装面向成员的提示文案。
+        evidence: 本次截图的识别结果，达上限转管理员时附带（用于增强
+            管理员通知中的书名/作者/评分等信息）。
+
+    """
     store = get_session_store()
     updated = store.mark_retry(str(group_id), str(user_id))
     if updated is None:
@@ -842,9 +853,10 @@ async def _increment_retry(
         user_id=str(user_id),
         reason=(
             f"用户 {user_id} 在群 {group_id} 连续 "
-            f"{plugin_config.fanqie_max_attempts} 次识别失败"
+            f"{plugin_config.fanqie_max_attempts} 次未通过验证"
             f"{_trace_suffix(trace)}"
         ),
+        evidence=evidence,
     )
     return (
         f"连续 {plugin_config.fanqie_max_attempts} 次识别失败，已通知管理员处理。"
@@ -887,7 +899,12 @@ async def _handle_reject(
     evidence: ReadingEvidence,
     reason: str | None,
 ) -> str:
-    """FR6：拒绝验证，结束会话并通知管理员决策。"""
+    """FR6：验证未通过 —— 计入重试；连续失败达上限才转管理员决策。
+
+    成员仍有重试机会时只提示重发截图（与 OCR 路径一致），避免仅视觉
+    模式下首判失败即把人送进待管理员处理阶段。
+
+    """
     store = get_session_store()
 
     cur = store.get(str(group_id), str(user_id))
@@ -928,17 +945,17 @@ async def _handle_reject(
         success=False,
         detail={"left_group": False, "reason": reason},
     )
-    await _await_admin_decision(
+    # 与 OCR 路径（_handle_insufficient）保持一致：**先给成员重试机会**，
+    # 只有在 `FANQIE_MAX_ATTEMPTS` 次都未通过时才由 _increment_retry
+    # 转入管理员决策。此前这里直接调 _await_admin_decision，导致仅视觉
+    # 模式下第一次判定失败就结束验证、重试计数形同废弃。
+    return await _increment_retry(
         bot,
-        group_id=str(group_id),
-        user_id=str(user_id),
-        reason=(
-            f"用户 {user_id} 在群 {group_id} 未通过验证（{reason}）"
-            f"{_trace_suffix(trace)}"
-        ),
+        group_id,
+        user_id,
+        kind=f"验证未通过（{reason}）" if reason else "验证未通过",
         evidence=evidence,
     )
-    return f"验证未通过，已通知管理员处理。{_trace_suffix(trace)}"
 
 
 async def _await_admin_decision(

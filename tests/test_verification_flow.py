@@ -424,14 +424,17 @@ async def test_handle_submission_reject_notifies_admin(
     )
 
     assert "验证未通过" in reply
+    # 回归修复：首次未通过不再直接转管理员，而是计入重试并停留在 waiting
+    assert "剩余尝试次数" in reply
     record = get_session_store().get("123", "10001")
     assert record is not None
-    assert record.status == "awaiting_admin"
+    assert record.status == "waiting"
+    assert record.retry_count == 1
     bans = [c for c in bot.calls if c[0] == "set_group_ban"]
     assert bans == []
+    # 未达上限时不应私信通知管理员
     privates = [c for c in bot.calls if c[0] == "send_private_msg"]
-    assert any("验证失败" in str(c[1]["message"]) for c in privates)
-    assert any("/keep" in str(c[1]["message"]) for c in privates)
+    assert not any("/keep" in str(c[1]["message"]) for c in privates)
 
 
 @pytest.mark.asyncio
@@ -484,7 +487,8 @@ async def test_handle_submission_policy_rejects_missing_element(
     assert "验证未通过" in reply
     record = get_session_store().get("123", "10001")
     assert record is not None
-    assert record.status == "awaiting_admin"
+    assert record.status == "waiting"
+    assert record.retry_count == 1
 
 
 @pytest.mark.asyncio
@@ -538,7 +542,72 @@ async def test_handle_submission_policy_rejects_author(
     assert "验证未通过" in reply
     record = get_session_store().get("123", "10001")
     assert record is not None
+    assert record.status == "waiting"
+    assert record.retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_policy_reject_reaches_admin_after_max_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """连续未通过达 FANQIE_MAX_ATTEMPTS 次后，才转入待管理员决策。"""
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
+        policy as policy_module,
+    )
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
+        AuthorEntry,
+        GroupPolicy,
+        VerificationPolicy,
+    )
+
+    monkeypatch.setattr(plugin_config, "fanqie_max_attempts", 3)
+    monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
+    monkeypatch.setattr(
+        policy_module,
+        "_policy_cache",
+        VerificationPolicy(
+            require_all=False,
+            required_elements=frozenset({"book_name", "author"}),
+            groups={
+                123: GroupPolicy(
+                    group_id=123,
+                    authors=(AuthorEntry(name="张三"),),
+                ),
+            },
+        ),
+    )
+
+    async def fake_recognize(url: str, *, models: list[str] | None = None) -> Any:
+        _ = (url, models)
+        return {
+            _m: _ocr_result_with_author("李四")
+            for _m in (models or ["PaddleOCR-VL-1.6"])
+        }
+
+    monkeypatch.setattr(flow_module, "recognize_image_url_multi", fake_recognize)
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+
+    replies = [
+        await handle_submission(
+            bot,
+            group_id=123,
+            user_id=10001,
+            image_url="https://example.com/shelf.png",
+        )
+        for _ in range(3)
+    ]
+
+    # 前两次仍停留在 waiting 并累计重试
+    store = get_session_store()
+    assert store.get("123", "10001") is not None
+    # 第 3 次达上限 → 转管理员决策
+    record = store.get("123", "10001")
+    assert record is not None
     assert record.status == "awaiting_admin"
+    assert "已通知管理员处理" in replies[-1]
 
 
 @pytest.mark.asyncio
