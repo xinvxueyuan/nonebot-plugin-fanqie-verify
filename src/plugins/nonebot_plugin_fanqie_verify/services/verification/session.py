@@ -358,6 +358,55 @@ class SessionStore:
                 removed.append(record)
         return tuple(removed)
 
+    def abandon(
+        self, group_id: str, user_id: str, *, status: str
+    ) -> SessionRecord | None:
+        """成员离群：结束会话、从内存移除，并返回记录供调用方落库。
+
+        与 :meth:`remove` 的区别是会先把会话置为终态再移除 —— 离群必须
+        **落库**，否则重启时 :func:`restore_pending_sessions` 会把已退群
+        成员的会话重新恢复出来（在「待处理列表」里误导管理员）。
+
+        Args:
+            group_id: 群号。
+            user_id: 成员 QQ 号。
+            status: 终态（``left_group`` / ``kicked`` 等）。
+
+        Returns:
+            结束后的会话记录；会话不存在时为 ``None``。
+
+        """
+        record = self.end(group_id, user_id, status=status)
+        if record is None:
+            return None
+        self._sessions.pop((group_id, user_id), None)
+        return record
+
+    def abandon_group(self, group_id: str, *, status: str) -> tuple[SessionRecord, ...]:
+        """群已不可用（机器人被移出/主动退群）：结束该群全部会话并返回记录。
+
+        同样会先置终态再移除，供调用方落库；``remove_group`` 只清内存，
+        不适合用在需要留痕的场景。
+
+        Args:
+            group_id: 群号。
+            status: 终态。
+
+        Returns:
+            结束后的会话记录。
+
+        """
+        ended: list[SessionRecord] = []
+        for key, record in list(self._sessions.items()):
+            if key[0] != group_id:
+                continue
+            self._cancel_timeout(key)
+            data = record.to_db_dict()
+            data["status"] = status
+            ended.append(SessionRecord(**data))
+            self._sessions.pop(key, None)
+        return tuple(ended)
+
     def remove(self, group_id: str, user_id: str) -> SessionRecord | None:
         """从内存移除会话（用于清理终态）。"""
         key = (group_id, user_id)

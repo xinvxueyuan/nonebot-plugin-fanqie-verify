@@ -1209,6 +1209,93 @@ async def schedule_kick_retry() -> None:
     logger.warning("踢人重试已用尽 {} 轮，保留待补踢等待重连补偿", times)
 
 
+async def handle_member_left(
+    *,
+    group_id: str,
+    user_id: str,
+    sub_type: str,
+    operator_id: int | None = None,
+) -> bool:
+    """成员离群：终止其验证会话并落库终态。
+
+    覆盖 OneBot11 ``group_decrease`` 的两种成员级 ``sub_type``：
+
+    - ``leave``（主动退群）→ 终态 ``left_group``
+    - ``kick``（被踢）→ 终态 ``kicked``
+
+    用 ``operator_id`` 与机器人自身账号比对，在事件 detail 里标记是否为
+    机器人踢出，便于日后查账区分「机器人按流程踢的」与「管理员手踢」。
+
+    Args:
+        group_id: 群号。
+        user_id: 离开的成员 QQ 号。
+        sub_type: 事件子类型（``leave`` / ``kick``）。
+        operator_id: 操作者 QQ 号（主动退群时通常是本人）。
+
+    Returns:
+        是否处理了既有会话（无会话时为 ``False``）。
+
+    """
+    store = get_session_store()
+    record = store.get(group_id, user_id)
+    if record is None:
+        return False
+    status = "left_group" if sub_type == "leave" else "kicked"
+    ended = store.abandon(group_id, user_id, status=status)
+    await _persist_session(ended)
+    by_bot = operator_id is not None and str(operator_id) == str(record.bot_id)
+    await _record_event(
+        ended or record,
+        event_type="verify.member_left",
+        success=True,
+        detail={
+            "sub_type": sub_type,
+            "status": status,
+            "operator_id": operator_id,
+            "by_bot": by_bot,
+            "previous_status": record.status,
+        },
+    )
+    logger.info(
+        "成员 {} 离开群 {}（{}），会话终止为 {} by_bot={} trace={}",
+        user_id,
+        group_id,
+        sub_type,
+        status,
+        by_bot,
+        record.trace_id,
+    )
+    return True
+
+
+async def handle_bot_left_group(*, group_id: str) -> int:
+    """机器人被移出群或主动退群：终止该群全部会话并落库。
+
+    这些会话所在群已不可用，任何超时/提醒任务都不可能完成，必须落库为
+    终态，否则重启后会被 :func:`restore_pending_sessions` 重新恢复。
+
+    Args:
+        group_id: 群号。
+
+    Returns:
+        被终止的会话数量。
+
+    """
+    store = get_session_store()
+    ended = store.abandon_group(group_id, status="expired")
+    for record in ended:
+        await _persist_session(record)
+        await _record_event(
+            record,
+            event_type="verify.group_unavailable",
+            success=False,
+            detail={"previous_status": record.status},
+        )
+    if ended:
+        logger.info("机器人已离开群 {}，终止该群 {} 个会话", group_id, len(ended))
+    return len(ended)
+
+
 async def restore_pending_sessions() -> int:
     """重启后从数据库恢复待处理会话并重建超时调度。
 

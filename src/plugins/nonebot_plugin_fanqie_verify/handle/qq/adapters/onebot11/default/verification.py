@@ -48,6 +48,8 @@ from ......services.verification import (
     admin_decision,
     get_policy,
     get_session_store,
+    handle_bot_left_group,
+    handle_member_left,
     handle_private_submission,
     handle_submission,
     reload_policy,
@@ -129,26 +131,37 @@ async def on_group_decrease(
     bot: OneBot11Bot,
     event: GroupDecreaseNoticeEvent,
 ) -> None:
-    """PRD 10：成员退群时清除遗留会话。
+    """PRD 10：成员退群/被踢时终止遗留会话（必须落库终态）。
 
-    边界守卫：若机器人在该群被移出（``sub_type == kick_me``），清理
-    该群全部会话；否则仅清理离开成员的会话。
+    三种情形：
+
+    - ``kick_me``：机器人自己被移出 → 终止该群全部会话。
+    - ``leave`` 且 ``user_id == self_id``：机器人主动退群（LLBot 用 leave
+      上报）→ 同样终止该群全部会话。
+    - 其余：仅终止该成员的会话；``leave`` 记 ``left_group``、``kick``
+      记 ``kicked``，并在事件里标记是否为机器人踢出。
+
+    注意 nonebot 的 OneBot11 适配器没有 ``group_dismiss`` 事件类，群解散
+    无法直接收到；解散时通常伴随 ``kick_me``，可被上面第一条覆盖。
 
     """
     _ = bot
-    store = get_session_store()
-    if event.sub_type == "kick_me":
-        removed = store.remove_group(str(event.group_id))
-        if removed:
+    if event.sub_type == "kick_me" or event.user_id == event.self_id:
+        cleared = await handle_bot_left_group(group_id=str(event.group_id))
+        if cleared:
             logger.info(
-                "机器人在群 %s 被移出，清理 %s 个会话",
+                "机器人已离开群 %s（%s），终止 %s 个会话",
                 event.group_id,
-                len(removed),
+                event.sub_type,
+                cleared,
             )
         return
-    record = store.remove(str(event.group_id), str(event.user_id))
-    if record is not None:
-        logger.info("成员退群，清除验证会话: %s", (event.group_id, event.user_id))
+    await handle_member_left(
+        group_id=str(event.group_id),
+        user_id=str(event.user_id),
+        sub_type=event.sub_type,
+        operator_id=event.operator_id,
+    )
 
 
 @_register(group_admin_change)
