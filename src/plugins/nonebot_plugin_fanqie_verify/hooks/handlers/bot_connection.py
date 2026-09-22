@@ -10,7 +10,7 @@ from nonebot.adapters import Bot
 from ...core.async_utils import fire_and_forget
 from ...core.config import plugin_config
 from ...services.message_store import record_bot_lifecycle
-from ...services.verification import backfill
+from ...services.verification import backfill, retry_pending_kicks
 
 if TYPE_CHECKING:
     from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot
@@ -33,6 +33,10 @@ async def on_bot_connect(bot: Bot) -> None:
     """
     fire_and_forget(
         record_bot_lifecycle(bot, "bot_connected"), name="record_bot_lifecycle"
+    )
+    # 掉线/重启期间踢人失败的成员在此补偿（新连接成功后即可执行）。
+    fire_and_forget(
+        retry_pending_kicks(cast("OneBot11Bot", bot)), name="retry_pending_kicks"
     )
     if not plugin_config.fanqie_backfill_enabled:
         return

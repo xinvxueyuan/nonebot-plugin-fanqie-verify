@@ -542,6 +542,19 @@ class SessionStore:
         self._schedule_timeout(key)
         return updated
 
+    def list_kick_pending(self) -> tuple[SessionRecord, ...]:
+        """返回待补踢会话的快照（踢人失败或 bot 掉线时积压）。
+
+        这些成员已过管理员决策超时、应被移出，但因机器人不在线或踢出失败
+        而未完成；机器人重连后由 :func:`retry_pending_kicks` 补偿。
+
+        """
+        return tuple(
+            record
+            for record in self._sessions.values()
+            if record.status == "kick_pending"
+        )
+
     def restore(self, record: SessionRecord) -> SessionRecord:
         """把持久化的会话记录恢复到内存并恢复超时调度（重启恢复）。"""
         key = (record.group_id, record.user_id)

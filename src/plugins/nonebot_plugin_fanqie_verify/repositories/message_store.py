@@ -287,7 +287,7 @@ async def list_pending_sessions(
     *,
     limit: int = 500,
 ) -> list[VerificationSession]:
-    """列出待处理的验证会话（waiting 与 awaiting_admin）。
+    """列出待处理的验证会话（waiting / awaiting_admin / kick_pending）。
 
     用于重启后恢复会话状态，确保验证中的成员不会被当作已通过。
 
@@ -296,7 +296,13 @@ async def list_pending_sessions(
         session,
         VerificationSession,
         None,
-        conditions=[VerificationSession.status.in_(("waiting", "awaiting_admin"))],
+        conditions=[
+            VerificationSession.status.in_((
+                "waiting",
+                "awaiting_admin",
+                "kick_pending",
+            ))
+        ],
         order_by=["-trigger_time"],
         limit=limit,
     )

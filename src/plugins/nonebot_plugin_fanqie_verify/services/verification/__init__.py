@@ -36,6 +36,7 @@ from .flow import (
     handle_submission,
     handle_timeout,
     restore_pending_sessions,
+    retry_pending_kicks,
     review_verification,
     start_verification,
 )
@@ -91,6 +92,7 @@ __all__ = [
     "notify_admins",
     "reload_policy",
     "restore_pending_sessions",
+    "retry_pending_kicks",
     "review_verification",
     "run_backfill",
     "send_guide",

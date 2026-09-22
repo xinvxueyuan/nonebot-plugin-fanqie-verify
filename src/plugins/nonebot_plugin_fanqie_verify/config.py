@@ -30,6 +30,10 @@ class Config(BaseModel):
         fanqie_review_max_times: 普通群成员（非群管理/群主）通过“重审”
             命令重新发起验证的最大次数，达到上限后需由管理员处理。
             管理员主动发起的重审不受此限制。默认 2 次。
+        fanqie_kick_retry_times: 踢出失败（掉线/网络异常/权限不足）后的
+            重试轮数，每次重试间隔见 fanqie_kick_retry_delay；重试用尽仍
+            失败则保留为待补踢，等机器人重连后补偿。默认 3。
+        fanqie_kick_retry_delay: 踢人重试的间隔秒数。默认 60。
         fanqie_notify_channel: 验证失败时通知管理员的渠道。``group`` 在群内
             发一条消息并 @ 全部管理员（可用 ``reply_message_id`` 引用成员原消息）；
             ``private`` 逐个私聊管理员，私聊失败时回退群内；``none`` 不发送。
@@ -103,6 +107,8 @@ class Config(BaseModel):
     fanqie_admin_decision_timeout: int = 57600  # 16 小时（秒）
     fanqie_remind_before_kick: tuple[int, ...] = (3600, 300)
     fanqie_review_max_times: int = 2
+    fanqie_kick_retry_times: int = 3
+    fanqie_kick_retry_delay: int = 60
     fanqie_notify_channel: Literal["group", "private", "none"] = "group"
     fanqie_book_name_max_len: int = 100
     fanqie_ocr_enabled: bool = True

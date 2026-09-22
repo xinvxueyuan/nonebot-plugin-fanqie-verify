@@ -8,6 +8,7 @@ matcher，便于测试。
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -1037,10 +1038,13 @@ async def handle_admin_decision_timeout(group_id: str, user_id: str) -> None:
         return
     bot = await _get_bot(bot_id)
     if bot is None:
+        # bot 不在线时不能直接放过成员：记为待补踢，重连后由
+        # retry_pending_kicks 补偿（重启后恢复的过期会话走的就是这条）。
         logger.warning(
-            "找不到 Bot {}，跳过管理决策超时处理 trace={}", bot_id, record.trace_id
+            "找不到 Bot {}，会话转入待补踢 trace={}", bot_id, record.trace_id
         )
-        await _persist_session(store.end(group_id, user_id, status="expired"))
+        await _persist_session(store.end(group_id, user_id, status="kick_pending"))
+        _schedule_kick_retry()
         return
 
     member = await actions.get_member_info(bot, int(group_id), int(user_id))
@@ -1067,7 +1071,25 @@ async def handle_admin_decision_timeout(group_id: str, user_id: str) -> None:
         int(user_id),
         reply_message_id=store.get_last_image_message(group_id, user_id),
     )
-    await actions.kick_member(bot, int(group_id), int(user_id), member)
+    kicked = await actions.kick_member(bot, int(group_id), int(user_id), member)
+    if not kicked:
+        # 踢出失败（掉线/权限/网络异常）：保留为待补踢，不误标 kicked。
+        logger.warning(
+            "管理决策超时踢出失败，转待补踢 group={} user={} trace={}",
+            group_id,
+            user_id,
+            record.trace_id,
+        )
+        await _persist_session(store.end(group_id, user_id, status="kick_pending"))
+        await _record_event(
+            record,
+            event_type="verify.admin_timeout",
+            success=False,
+            detail={"left_group": False, "kick_failed": True},
+        )
+        _schedule_kick_retry()
+        return
+
     kicked_record = store.end(group_id, user_id, status="kicked")
     await _persist_session(kicked_record)
     await _record_event(
@@ -1082,6 +1104,109 @@ async def handle_admin_decision_timeout(group_id: str, user_id: str) -> None:
         group_id,
         record.trace_id,
     )
+
+
+async def retry_pending_kicks(bot: Bot) -> int:
+    """机器人重连后补踢所有待补踢成员（掉线/重启期间的容灾补偿）。
+
+    遍历 ``kick_pending`` 会话逐个重试踢出：成功转为 ``kicked``，成员已
+    不在群视为达成目标同样转 ``kicked``，仍失败则保留待下次补偿。
+
+    Args:
+        bot: 当前已连接的 Bot 实例。
+
+    Returns:
+        本次补踢完成（转为 kicked）的会话数量。
+
+    """
+    store = get_session_store()
+    pending = store.list_kick_pending()
+    if not pending:
+        return 0
+    logger.info("开始补踢 {} 个待处理成员", len(pending))
+    kicked = 0
+    for record in pending:
+        group_id, user_id = record.group_id, record.user_id
+        member = await actions.get_member_info(bot, int(group_id), int(user_id))
+        if not await actions.kick_member(bot, int(group_id), int(user_id), member):
+            logger.warning(
+                "补踢仍失败，保留待补踢 group={} user={} trace={}",
+                group_id,
+                user_id,
+                record.trace_id,
+            )
+            continue
+        ended = store.end(group_id, user_id, status="kicked")
+        await _persist_session(ended)
+        await _record_event(
+            record,
+            event_type="verify.kick_retry",
+            success=True,
+            detail={"left_group": member is None},
+        )
+        kicked += 1
+        logger.info(
+            "补踢完成：成员 {} 已从群 {} 移出 trace={}",
+            user_id,
+            group_id,
+            record.trace_id,
+        )
+    logger.info("补踢结束：成功 {} / 待处理 {}", kicked, len(pending))
+    return kicked
+
+
+def _schedule_kick_retry() -> None:
+    """后台启动一次踢人重试循环（不阻塞当前超时任务）。"""
+    from ...core.async_utils import fire_and_forget
+
+    fire_and_forget(schedule_kick_retry(), name="schedule_kick_retry")
+
+
+async def retry_pending_kicks_once() -> int:
+    """补踢一轮：自动为待补踢会话查找各自的已连接 bot。
+
+    与 :func:`retry_pending_kicks` 的区别是不需要调用方提供 bot，供定时
+    重试循环使用（此时 bot 可能刚恢复连接）。
+
+    Returns:
+        本轮完成补踢的会话数量。
+
+    """
+    store = get_session_store()
+    bot_ids = {record.bot_id for record in store.list_kick_pending() if record.bot_id}
+    done = 0
+    for bot_id in bot_ids:
+        bot = await _get_bot(bot_id)
+        if bot is None:
+            logger.info("补踢跳过：Bot {} 尚未连接", bot_id)
+            continue
+        done += await retry_pending_kicks(bot)
+    return done
+
+
+async def schedule_kick_retry() -> None:
+    """按配置的轮数与间隔后台重试待补踢成员。
+
+    覆盖「bot 一直在线、只是单次踢出失败（权限/瞬时错误）」的情况；若成员
+    在此期间已补踢完或已退群，循环提前结束。重试用尽仍失败的会话保持
+    ``kick_pending``，由机器人重连时的 :func:`retry_pending_kicks` 兜底。
+
+    """
+    times = max(0, plugin_config.fanqie_kick_retry_times)
+    delay = max(1, plugin_config.fanqie_kick_retry_delay)
+    store = get_session_store()
+    for attempt in range(1, times + 1):
+        await asyncio.sleep(delay)
+        if not store.list_kick_pending():
+            return
+        done = await retry_pending_kicks_once()
+        remaining = len(store.list_kick_pending())
+        logger.info(
+            "踢人重试第 {}/{} 轮：完成 {}，剩余 {}", attempt, times, done, remaining
+        )
+        if not remaining:
+            return
+    logger.warning("踢人重试已用尽 {} 轮，保留待补踢等待重连补偿", times)
 
 
 async def restore_pending_sessions() -> int:
@@ -1253,5 +1378,6 @@ __all__ = [
     "handle_submission",
     "handle_timeout",
     "restore_pending_sessions",
+    "retry_pending_kicks",
     "start_verification",
 ]

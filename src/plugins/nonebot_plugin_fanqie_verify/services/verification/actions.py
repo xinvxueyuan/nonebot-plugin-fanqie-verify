@@ -319,6 +319,13 @@ async def kick_member(
     except ActionFailed:
         logger.warning("踢出失败 group={} user={}", group_id, user_id)
         return False
+    except Exception:  # noqa: BLE001 - 掉线/连接中断等异常不能冒泡
+        logger.exception(
+            "踢出时发生异常（可能是机器人掉线或连接中断）group={} user={}",
+            group_id,
+            user_id,
+        )
+        return False
     return True
 
 
