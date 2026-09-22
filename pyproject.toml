@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-fanqie-verify"
-version = "0.3.0"
+version = "0.4.0"
 description = "番茄读书群入群验证插件：新成员入群后要求发送自己发布的番茄小说书评详情页截图，OCR 识别后自动放行或通知管理员决策"
 keywords = ["nonebot2", "nonebot", "bot", "ocr", "paddleocr", "group-management"]
 readme = "README.md"

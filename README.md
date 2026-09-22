@@ -202,6 +202,10 @@ task fix     # 自动修复 lint/格式
 
 插件源码位于 `src/plugins/nonebot_plugin_fanqie_verify/`。
 
+## 更新日志
+
+各版本的重要变更见 [CHANGELOG.md](./CHANGELOG.md)。
+
 ## 文档
 
 - [NoneBot2 文档](https://nonebot.dev/)
