@@ -14,7 +14,7 @@ def test_plugin_config_defaults() -> None:
     cfg = Config()
     assert cfg.fanqie_response_timeout == 600
     assert cfg.fanqie_max_attempts == 3
-    assert cfg.fanqie_notify_admin is True
+    assert cfg.fanqie_notify_channel == "group"
     assert cfg.fanqie_admin_ids == set()
     assert cfg.fanqie_book_name_max_len == 100
     assert cfg.fanqie_remind_before_kick == (3600, 300)

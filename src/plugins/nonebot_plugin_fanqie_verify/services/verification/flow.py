@@ -641,7 +641,7 @@ async def handle_timeout(group_id: str, user_id: str) -> None:
             bot,
             group_id=int(group_id),
             user_id=int(user_id),
-            event=None,
+            reply_message_id=None,
             message=f"用户 {user_id} 在群 {group_id} 超时未提供截图，且已不在群聊中。",
         )
         return
@@ -835,7 +835,7 @@ async def _increment_retry(
             bot,
             group_id=group_id,
             user_id=user_id,
-            event=None,
+            reply_message_id=None,
             message=(
                 f"用户 {user_id} 在群 {group_id} 连续 "
                 f"{plugin_config.fanqie_max_attempts} 次识别失败，但已不在群聊中。"
@@ -930,7 +930,7 @@ async def _handle_reject(
             bot,
             group_id=group_id,
             user_id=user_id,
-            event=None,
+            reply_message_id=None,
             message=(
                 f"用户 {user_id} 在群 {group_id} 未通过验证（{reason}），"
                 "但已不在群聊中。"
@@ -1010,7 +1010,7 @@ async def _await_admin_decision(
         bot,
         group_id=int(group_id),
         user_id=int(user_id),
-        event=None,
+        reply_message_id=store.get_last_image_message(group_id, user_id),
         message=message,
     )
 

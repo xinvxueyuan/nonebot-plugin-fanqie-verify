@@ -6,6 +6,8 @@
 
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -28,7 +30,10 @@ class Config(BaseModel):
         fanqie_review_max_times: 普通群成员（非群管理/群主）通过“重审”
             命令重新发起验证的最大次数，达到上限后需由管理员处理。
             管理员主动发起的重审不受此限制。默认 2 次。
-        fanqie_notify_admin: 验证失败时是否私信通知管理员决定通过或踢出。
+        fanqie_notify_channel: 验证失败时通知管理员的渠道。``group`` 在群内
+            发一条消息并 @ 全部管理员（可用 ``reply_message_id`` 引用成员原消息）；
+            ``private`` 逐个私聊管理员，私聊失败时回退群内；``none`` 不发送。
+            默认 ``group``。
         fanqie_book_name_max_len: FR4 综合判断中有效书名的最大字符数。
         fanqie_ocr_enabled: 是否启用 PaddleOCR 识别。为 False 时跳过 OCR，
             直接使用视觉模型判定（仅视觉模式）。默认 True（启用）。
@@ -98,7 +103,7 @@ class Config(BaseModel):
     fanqie_admin_decision_timeout: int = 57600  # 16 小时（秒）
     fanqie_remind_before_kick: tuple[int, ...] = (3600, 300)
     fanqie_review_max_times: int = 2
-    fanqie_notify_admin: bool = True
+    fanqie_notify_channel: Literal["group", "private", "none"] = "group"
     fanqie_book_name_max_len: int = 100
     fanqie_ocr_enabled: bool = True
     fanqie_ocr_api_url: str = ""

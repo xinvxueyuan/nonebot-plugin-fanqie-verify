@@ -388,7 +388,7 @@ async def test_handle_submission_reject_notifies_admin(
     )
 
     monkeypatch.setattr(plugin_config, "fanqie_admin_ids", {90001})
-    monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
+    monkeypatch.setattr(plugin_config, "fanqie_notify_channel", "group")
     monkeypatch.setattr(
         policy_module,
         "_policy_cache",
@@ -432,9 +432,9 @@ async def test_handle_submission_reject_notifies_admin(
     assert record.retry_count == 1
     bans = [c for c in bot.calls if c[0] == "set_group_ban"]
     assert bans == []
-    # 未达上限时不应私信通知管理员
-    privates = [c for c in bot.calls if c[0] == "send_private_msg"]
-    assert not any("/keep" in str(c[1]["message"]) for c in privates)
+    # 未达上限时不应通知管理员（任何渠道）
+    notices = [c for c in bot.calls if c[0] in ("send_group_msg", "send_private_msg")]
+    assert not any("/keep" in str(c[1]["message"]) for c in notices)
 
 
 @pytest.mark.asyncio
@@ -562,7 +562,7 @@ async def test_policy_reject_reaches_admin_after_max_attempts(
     )
 
     monkeypatch.setattr(plugin_config, "fanqie_max_attempts", 3)
-    monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
+    monkeypatch.setattr(plugin_config, "fanqie_notify_channel", "group")
     monkeypatch.setattr(
         policy_module,
         "_policy_cache",
@@ -618,7 +618,7 @@ async def test_handle_timeout_notifies_and_ends(
     from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_admin_ids", {90001})
-    monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
+    monkeypatch.setattr(plugin_config, "fanqie_notify_channel", "group")
 
     bot: Any = FakeBot()
 
@@ -633,11 +633,17 @@ async def test_handle_timeout_notifies_and_ends(
 
     kicks = [c for c in bot.calls if c[0] == "set_group_kick"]
     assert kicks == []
-    privates = [c for c in bot.calls if c[0] == "send_private_msg"]
-    assert len(privates) >= 1
-    admin_notices = [c for c in privates if c[1].get("user_id") == 90001]
-    assert len(admin_notices) == 1
-    assert "/keep" in str(admin_notices[0][1]["message"])
+    # group 渠道：一条群消息，@ 管理员 90001 并给出 /keep 指引
+    notices = [
+        c
+        for c in bot.calls
+        if c[0] == "send_group_msg" and "/keep" in str(c[1]["message"])
+    ]
+    assert len(notices) == 1
+    assert any(
+        seg.type == "at" and str(seg.data["qq"]) == "90001"
+        for seg in notices[0][1]["message"]
+    )
     record = get_session_store().get("123", "10001")
     assert record is not None
     assert record.status == "awaiting_admin"
@@ -726,7 +732,7 @@ async def test_handle_timeout_member_already_left(
     """成员已退群时，超时处理应跳过动作并结束会话。"""
     from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
-    monkeypatch.setattr(plugin_config, "fanqie_notify_admin", False)
+    monkeypatch.setattr(plugin_config, "fanqie_notify_channel", "none")
 
     bot: Any = FakeBot(in_group=False)
 
@@ -1160,7 +1166,7 @@ async def test_handle_timeout_announces_member(
     from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_admin_ids", {90001})
-    monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
+    monkeypatch.setattr(plugin_config, "fanqie_notify_channel", "group")
 
     bot: Any = FakeBot()
 
@@ -1301,7 +1307,7 @@ async def test_flow_records_timeout_event(
     from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
 
     monkeypatch.setattr(plugin_config, "fanqie_admin_ids", {90001})
-    monkeypatch.setattr(plugin_config, "fanqie_notify_admin", True)
+    monkeypatch.setattr(plugin_config, "fanqie_notify_channel", "group")
     bot: Any = FakeBot()
     recorded = await _record_events(monkeypatch, bot)
     await start_verification(bot, group_id=123, user_id=10001)

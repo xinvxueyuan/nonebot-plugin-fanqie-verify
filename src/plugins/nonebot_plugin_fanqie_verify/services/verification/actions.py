@@ -19,7 +19,7 @@ from nonebot.adapters.onebot.v11.message import Message, MessageSegment
 from ...core.config import plugin_config
 
 if TYPE_CHECKING:
-    from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot, GroupMessageEvent
+    from nonebot.adapters.onebot.v11 import Bot as OneBot11Bot
 
 _ACTION_ERROR = "执行群管理操作失败（权限不足或参数错误）"
 
@@ -322,15 +322,84 @@ async def kick_member(
     return True
 
 
+async def _notify_group(
+    bot: OneBot11Bot,
+    *,
+    group_id: int,
+    full_message: str,
+    reply_message_id: int | None,
+) -> int:
+    """在群内发送**一条**通知并 @ 全部管理员。
+
+    Args:
+        bot: OneBot11 Bot 实例。
+        group_id: 群号。
+        full_message: 已附加决策指引的通知正文。
+        reply_message_id: 需要引用的成员原消息 id；``None`` 时不引用。
+
+    Returns:
+        成功时为 ``1``，发送失败为 ``0``。
+
+    """
+    message = Message()
+    for admin_id in sorted(plugin_config.fanqie_admin_ids):
+        message += MessageSegment.at(admin_id)
+    message += f" {full_message}"
+    try:
+        await bot.send_group_msg(
+            group_id=group_id,
+            message=_with_reply(message, reply_message_id),
+        )
+    except ActionFailed:
+        logger.warning("群内通知管理员失败 group={}", group_id)
+        return 0
+    return 1
+
+
+async def _notify_private(
+    bot: OneBot11Bot,
+    *,
+    group_id: int,
+    full_message: str,
+) -> int:
+    """逐个私聊管理员；私聊失败时回退到群内 @ 该管理员。
+
+    Args:
+        bot: OneBot11 Bot 实例。
+        group_id: 群号（回退发送用）。
+        full_message: 已附加决策指引的通知正文。
+
+    Returns:
+        成功送达的管理员数量（私聊或群内回退各计一次）。
+
+    """
+    sent = 0
+    for admin_id in sorted(plugin_config.fanqie_admin_ids):
+        try:
+            await bot.send_private_msg(user_id=admin_id, message=full_message)
+            sent += 1
+        except ActionFailed:
+            logger.warning("私聊通知失败 admin={}，回退群内发送", admin_id)
+            try:
+                await bot.send_group_msg(
+                    group_id=group_id,
+                    message=(Message(MessageSegment.at(admin_id)) + f" {full_message}"),
+                )
+                sent += 1
+            except ActionFailed:
+                logger.warning("群内通知失败 admin={}", admin_id)
+    return sent
+
+
 async def notify_admins(
     bot: OneBot11Bot,
     *,
     group_id: int,
     user_id: int,
-    event: GroupMessageEvent | None,
+    reply_message_id: int | None = None,
     message: str,
 ) -> int:
-    """向配置的管理员列表发送通知（私聊优先，回退群内转发）。
+    """按 ``fanqie_notify_channel`` 向配置的管理员发送通知。
 
     通知附加上对应群的作者白名单（来自放行策略的群节点），并提示管理
     员在群内执行 /kick 或 /keep 决策。
@@ -339,35 +408,25 @@ async def notify_admins(
         bot: OneBot11 Bot 实例。
         group_id: 群号。
         user_id: 相关成员 QQ 号。
-        event: 触发事件（用于回退发送）。
+        reply_message_id: 成员原消息 id，仅在 ``group`` 渠道下用于引用。
         message: 通知文本。
 
     Returns:
-        成功发送的管理员数量。
+        成功发送的消息条数；``none`` 渠道恒为 ``0``。
 
     """
-    if not plugin_config.fanqie_notify_admin:
+    channel = plugin_config.fanqie_notify_channel
+    if channel == "none":
         return 0
     full_message = _decorate_notice(message, group_id, user_id)
-    sent = 0
-    for admin_id in sorted(plugin_config.fanqie_admin_ids):
-        try:
-            await bot.send_private_msg(user_id=admin_id, message=full_message)
-            sent += 1
-        except ActionFailed:
-            logger.warning("私聊通知失败 admin={}，回退群内发送", admin_id)
-            if event is not None:
-                try:
-                    await bot.send_group_msg(
-                        group_id=event.group_id,
-                        message=(
-                            Message(MessageSegment.at(admin_id)) + f" {full_message}"
-                        ),
-                    )
-                    sent += 1
-                except ActionFailed:
-                    logger.warning("群内通知失败 admin={}", admin_id)
-    return sent
+    if channel == "group":
+        return await _notify_group(
+            bot,
+            group_id=group_id,
+            full_message=full_message,
+            reply_message_id=reply_message_id,
+        )
+    return await _notify_private(bot, group_id=group_id, full_message=full_message)
 
 
 def _decorate_notice(message: str, group_id: int, user_id: int) -> str:

@@ -101,7 +101,7 @@
 | `FANQIE_EXTEND_ENABLED` | 是否启用「延期」命令 | `true` |
 | `FANQIE_EXTEND_DEFAULT_HOURS` | 延期不带时长参数时的默认小时数 | `6` |
 | `FANQIE_EXTEND_MAX_HOURS` | 单次延期的最大小时数（不限制累计次数） | `48` |
-| `FANQIE_NOTIFY_ADMIN` | 验证失败时是否私信通知管理员决定通过或踢出 | `true` |
+| `FANQIE_NOTIFY_CHANNEL` | 验证失败通知管理员的渠道：`group`（群内一条消息并 @ 全部管理员，可引用原消息）/ `private`（逐个私聊，失败回退群内）/ `none`（不通知） | `group` |
 | `FANQIE_BOOK_NAME_MAX_LEN` | FR4 有效书名最大字符数 | `100` |
 | `FANQIE_OCR_API_URL` | OCR 任务提交地址，留空用官方默认 | 官方默认 |
 | `FANQIE_OCR_API_TOKEN` | OCR API 认证令牌（必填） | 空 |
