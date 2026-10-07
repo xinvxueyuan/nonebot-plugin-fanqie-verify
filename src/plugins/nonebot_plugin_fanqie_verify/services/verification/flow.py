@@ -320,17 +320,15 @@ async def _notice_block_reply(
     listing = await notices.fetch_group_notices(bot, group_id)
     index_map = notices.notice_index_map(listing) if listing is not None else {}
     by_id = {notice.notice_id: notice for notice in (listing or [])}
-    rows = []
-    for notice_id in unread:
-        label = index_map.get(notice_id)
-        rows.append(
-            notice_render.Row(
-                id_text=f"公告 {label}" if label else f"公告 {notice_id}",
-                badge="未确认",
-                badge_warn=True,
-                preview=by_id[notice_id].preview if notice_id in by_id else "",
-            )
+    rows = [
+        notice_render.Row(
+            id_text=notices.notice_label(index_map, notice_id),
+            badge="未确认",
+            badge_warn=True,
+            preview=by_id[notice_id].preview if notice_id in by_id else "",
         )
+        for notice_id in unread
+    ]
     return notice_render.Card(
         title="请先确认阅读群公告",
         lines=[
@@ -1042,7 +1040,7 @@ async def _handle_pass(
     )
     rows = [
         notice_render.Row(
-            id_text=f"公告 {item.label}" if item.label else "公告（序号不可用）",
+            id_text=item.label or "公告（序号不可用）",
             badge="已确认",
             preview=item.preview or "（无正文）",
         )

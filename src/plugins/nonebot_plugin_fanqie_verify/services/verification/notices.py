@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any
 from nonebot import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from nonebot.adapters.onebot.v11 import Bot
 
@@ -445,7 +445,7 @@ async def build_notice_summary(bot: Bot, group_id: int, user_id: int) -> NoticeS
     confirmed = tuple(
         ConfirmedNotice(
             notice_id=notice_id,
-            label=str(index_map[notice_id]) if notice_id in index_map else "",
+            label=notice_label(index_map, notice_id),
             preview=by_id[notice_id].preview if notice_id in by_id else "",
         )
         for notice_id in read_ids
@@ -482,6 +482,28 @@ def notice_index_map(notices: Sequence[GroupNotice]) -> dict[str, int]:
 
     """
     return {notice.notice_id: index for index, notice in enumerate(notices, start=1)}
+
+
+def notice_label(index_map: Mapping[str, int], notice_id: str) -> str:
+    """公告的**对外显示标签**：能算出序号时用 ``#N``，否则回退公告 id。
+
+    用户 2026-10-07 实机反馈：列表里每项的**大标题**是那串长公告 id，太难读 ——
+    要的是 ``#1``、``#2`` 这种「数据库映射编号」。故凡是要把公告指给用户看的地方
+    （列表主文本、绑定/取消回执、闸门拦截图、通过回执）统一走这里。
+
+    序号算不出来（拿不到公告列表 / 公告已被删除）时**回退原 id**：这时 id 是唯一
+    能定位它的东西，编造一个序号反而会指错。
+
+    Args:
+        index_map: :func:`notice_index_map` 的结果。
+        notice_id: 真实公告 id。
+
+    Returns:
+        ``#N`` 或原样 ``notice_id``。
+
+    """
+    number = index_map.get(notice_id)
+    return f"#{number}" if number else notice_id
 
 
 def resolve_notice_tokens(
@@ -578,6 +600,7 @@ __all__ = [
     "is_bindable",
     "load_bindings",
     "notice_index_map",
+    "notice_label",
     "parse_notice",
     "resolve_bindable",
     "resolve_notice_tokens",

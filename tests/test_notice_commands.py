@@ -105,14 +105,56 @@ def _last_text(sent: list[dict[str, Any]]) -> str:
     return str(sent[-1]["message"])
 
 
+def test_no_reply_segment_on_notice_cards() -> None:
+    """所有公告命令的发送路径都**不得**带 ``MessageSegment.reply``。
+
+    用户 2026-10-07 实机反馈：带引用段的消息会被 QQ **强制折叠**成回复下方的小缩略图
+    （不是正常的「图文」消息），成员得再点一次才能看清 —— 出图的意义就没了。
+    定位成员用 ``@`` 即可，不需要引用。
+
+    这是 AST 静态守卫（不是运行期用例）：``_send_notice_card`` 是**唯一**发图路径，
+    任何人在它里面补回 ``reply``/``anchor`` 都会让这条红掉。
+    """
+    import ast
+    import pathlib as _pathlib
+
+    src_path = _pathlib.Path(
+        "src/plugins/nonebot_plugin_fanqie_verify/handle/qq/adapters"
+        "/onebot11/default/verification.py"
+    )
+    source = src_path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    senders = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name in {"_send_notice_card", "_send_member_reply"}
+    ]
+    assert len(senders) == 2, "扫描失效：没找到两个发送函数"
+
+    for node in senders:
+        body = ast.get_source_segment(source, node) or ""
+        # _send_member_reply 的纯文本分支仍可引用（无图、不会被折叠）；
+        # 但它转给 _send_notice_card 的卡片分支不能。这里只锁发图函数。
+        if node.name == "_send_notice_card":
+            assert ".reply(" not in body, f"{node.name} 又加回了引用段"
+            assert "anchor" not in body, f"{node.name} 残留 anchor"
+            assert "MessageSegment.image(png)" in body, "发图逻辑不应被改动"
+
+
 # ---------------------------------------------------------------- 获取群公告列表
 
 
 @pytest.mark.asyncio
-async def test_notice_list_shows_hidden_ids(
+async def test_notice_list_shows_index_not_long_id(
     app: App, sent: list[dict[str, Any]]
 ) -> None:
-    """公告 id（客户端隐藏值）必须出现在回复里，并标注能否作验证公告。"""
+    """列表每项的**主文本必须是 #序号**，不是那串长公告 id。
+
+    用户 2026-10-07 实机反馈：「展示的每项大标题一样很长啊，我要的是 #1、#2 这种
+    数据库映射编号」—— 公告 id 又长又手抄不动，序号才是给人的。
+    """
     from nonebot.adapters.onebot.v11 import Bot
 
     async with app.test_matcher(notice_cmd.notice_list_cmd) as ctx:
@@ -128,10 +170,12 @@ async def test_notice_list_shows_hidden_ids(
         ctx.receive_event(bot, _event("获取群公告列表"))
 
     text = _last_text(sent)
-    assert "N-A" in text and "N-B" in text
+    assert "#1" in text and "#2" in text  # 主文本 = 序号
+    assert "N-A" not in text and "N-B" not in text  # 长 id 不再当标题
     assert "可作验证公告" in text
     assert "未开确认" in text
     assert "带确认的公告" in text
+    assert "#数字" in text  # 说明里点出 # 前缀的含义
 
 
 @pytest.mark.asyncio
@@ -211,8 +255,9 @@ async def test_notice_bind_skips_unconfirmed_and_reports(
     assert (await notices.load_bindings())[_GROUP_ID] == ("OK1", "OK2")
 
     text = _last_text(sent)
-    assert "OK1" in text and "OK2" in text  # 汇报新增了什么
-    assert "NO1" in text and "GHOST" in text  # 汇报跳过了什么
+    assert "#1" in text and "#3" in text  # 汇报新增了什么（序号）
+    assert "OK1" not in text  # 不再回显长 id
+    assert "#2" in text and "GHOST" in text  # 汇报跳过了什么（序号 2 = NO1）
     assert "确认" in text  # 未开确认的原因
     assert "找不到" in text  # 不存在的原因
 
@@ -242,7 +287,7 @@ async def test_notice_bind_by_index(app: App, sent: list[dict[str, Any]]) -> Non
     # 序号被翻译成真实 id 后再校验与写入（存的是 id，不是序号）
     assert (await notices.load_bindings())[_GROUP_ID] == ("AAA", "CCC")
     text = _last_text(sent)
-    assert "AAA" in text and "CCC" in text
+    assert "#1" in text and "#3" in text
 
 
 @pytest.mark.asyncio
@@ -270,7 +315,7 @@ async def test_notice_bind_by_index_skips_unconfirmed(
 
     assert _GROUP_ID not in await notices.load_bindings()
     text = _last_text(sent)
-    assert "BBB" in text
+    assert "#2" in text  # 序号 2（BBB）未开确认被跳过
     assert "确认" in text  # 未开确认的原因
 
 
@@ -362,7 +407,7 @@ async def test_notice_show_lists_bound(app: App, sent: list[dict[str, Any]]) -> 
         ctx.receive_event(bot, _event("查看验证公告"))
 
     text = _last_text(sent)
-    assert "OK1" in text
+    assert "#1" in text
     assert "群规：先看公告再发言" in text
 
 

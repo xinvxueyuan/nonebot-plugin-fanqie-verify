@@ -426,7 +426,7 @@ async def test_notice_gate_block_shows_index_when_listing_available(
     )
 
     text = _reply_text(reply)
-    assert "公告 2" in text  # N2 是列表里的第 2 条
+    assert "#2" in text  # N2 是列表里的第 2 条（主文本用序号）
     assert "群规二" in text  # 带正文预览，方便成员对上号
     assert "未确认" in text
 
@@ -490,7 +490,7 @@ async def test_pass_receipt_reports_confirmed_notices(
     assert "验证通过" in text
     # 卡片里要能看到「已确认阅读公告 1、2（本群共要求 2 条）」
     assert "已确认阅读公告" in text
-    assert "1、2" in text
+    assert "#1、#2" in text
     assert "群规一" in text
 
 

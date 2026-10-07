@@ -255,7 +255,6 @@ async def _send_member_reply(
             event,
             reply,
             _card_fallback_text(reply),
-            reply_to_message_id=event.message_id,
             at_user_id=event.user_id,
         )
         return
@@ -1070,33 +1069,29 @@ async def _send_notice_card(
     card: notice_render.Card,
     text: str,
     *,
-    reply_to_message_id: int | None = None,
     at_user_id: int | None = None,
 ) -> None:
     """优先发渲染图；渲染不通时回退纯文本（命令不能表现为「没反应」）。
 
+    ⚠️ **绝不加 ``MessageSegment.reply``**（用户 2026-10-07 实机反馈）：QQ 对带引用段的
+    消息会把图片**强制折叠成回复下方的小缩略图**，成员得再点一次才能看清；不带引用的
+    消息才会作为正常的「图文」消息按原尺寸显示。定位成员靠 ``@`` 就够，不需要引用。
+
     Args:
         bot: 当前 Bot 实例。
-        event: 触发命令的群消息事件（提供群号与默认引用/@ 目标）。
+        event: 触发命令的群消息事件（提供群号与默认 @ 目标）。
         card: 要渲染的卡片内容。
         text: 渲染失败时回退的纯文本（须与卡片口径一致）。
-        reply_to_message_id: 需要引用某条消息时传入（默认引用触发命令的消息）。
         at_user_id: 需要 @ 的成员；默认 @ 触发者。
 
     """
     target_user_id = at_user_id if at_user_id is not None else event.user_id
-    anchor = (
-        reply_to_message_id if reply_to_message_id is not None else event.message_id
-    )
     png = await notice_render.render_card(card)
     if png is not None:
         message = MessageSegment.at(target_user_id) + MessageSegment.image(png)
     else:
         message = MessageSegment.at(target_user_id) + f" {text}"
-    await bot.send_group_msg(
-        group_id=event.group_id,
-        message=MessageSegment.reply(anchor) + message,
-    )
+    await bot.send_group_msg(group_id=event.group_id, message=message)
 
 
 @_register(notice_list_cmd)
@@ -1123,6 +1118,7 @@ async def on_notice_list(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
 
     bindings = await notice_service.load_bindings()
     bound = set(bindings.get(event.group_id, ()))
+    index_map = notice_service.notice_index_map(notices)
     rows: list[notice_render.Row] = []
     bindable_count = 0
     for notice in notices:
@@ -1140,7 +1136,8 @@ async def on_notice_list(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
             meta_bits.append("置顶")
         rows.append(
             notice_render.Row(
-                id_text=notice.notice_id,
+                # 主文本用 #序号（用户 2026-10-07 要求：不要那串长公告 id）
+                id_text=notice_service.notice_label(index_map, notice.notice_id),
                 badge=badge,
                 badge_warn=not can,
                 preview=notice.preview or "（无正文）",
@@ -1151,11 +1148,13 @@ async def on_notice_list(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
     footer = (
         f"共 {len(notices)} 条公告，其中 {bindable_count} 条"
         "带「确认阅读」可作验证公告。" + "\n"
-        "用「设为验证公告 <序号>」绑定（可写多个序号，空格分隔）。"
+        "用「设为验证公告 <序号>」绑定（如 设为验证公告 1 3，空格分隔）。"
     )
     card = notice_render.Card(
         title="本群公告列表",
-        lines=["下面的数字是**序号**（按本列表顺序），绑定/取消时填序号即可。"],
+        lines=[
+            "每项前面的 **#数字** 就是序号（按本列表顺序），绑定/取消时填这个数字即可。"
+        ],
         rows=rows,
         tone="info",
         footer=footer,
@@ -1182,6 +1181,7 @@ async def on_notice_show(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
 
     live = await notice_service.fetch_group_notices(bot, event.group_id)
     by_id = {notice.notice_id: notice for notice in live} if live is not None else {}
+    index_map = notice_service.notice_index_map(live) if live is not None else {}
     rows: list[notice_render.Row] = []
     for notice_id in bound:
         notice = by_id.get(notice_id)
@@ -1193,7 +1193,7 @@ async def on_notice_show(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
             badge, warn, preview = "已绑定", False, notice.preview or "（无正文）"
         rows.append(
             notice_render.Row(
-                id_text=notice_id,
+                id_text=notice_service.notice_label(index_map, notice_id),
                 badge=badge,
                 badge_warn=warn,
                 preview=preview,
@@ -1264,16 +1264,23 @@ async def on_notice_bind(
         else ([], [])
     )
 
+    index_map = notice_service.notice_index_map(live)
     lines: list[str] = []
     if added:
-        lines.append(f"本次新增 {len(added)} 条：{'、'.join(added)}")
+        lines.append(
+            f"本次新增 {len(added)} 条："
+            + "、".join(notice_service.notice_label(index_map, x) for x in added)
+        )
     if already:
-        lines.append(f"已在绑定中（跳过）：{'、'.join(already)}")
+        lines.append(
+            "已在绑定中（跳过）："
+            + "、".join(notice_service.notice_label(index_map, x) for x in already)
+        )
     rows: list[notice_render.Row] = []
     for notice_id, reason in skipped:
         rows.append(
             notice_render.Row(
-                id_text=notice_id,
+                id_text=notice_service.notice_label(index_map, notice_id),
                 badge="跳过",
                 badge_warn=True,
                 preview=reason,
@@ -1356,11 +1363,14 @@ async def on_notice_unbind(
         # 没查列表（或列表拿不到）时按 id 处理
         targets = tokens
     removed, missing = await notice_service.unbind_notices(event.group_id, targets)
+    index_map = notice_service.notice_index_map(live) if live is not None else {}
     lines = []
     if removed:
-        lines.append(f"已取消 {len(removed)} 条：{'、'.join(removed)}")
+        labels = [notice_service.notice_label(index_map, x) for x in removed]
+        lines.append(f"已取消 {len(removed)} 条：{'、'.join(labels)}")
     if missing:
-        lines.append(f"本来就没绑定（忽略）：{'、'.join(missing)}")
+        labels = [notice_service.notice_label(index_map, x) for x in missing]
+        lines.append(f"本来就没绑定（忽略）：{'、'.join(labels)}")
     if not removed:
         lines.append("没有取消任何绑定。")
     left = list((await notice_service.load_bindings()).get(event.group_id, ()))
