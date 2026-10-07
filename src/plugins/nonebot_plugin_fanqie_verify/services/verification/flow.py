@@ -24,7 +24,7 @@ from ...services.ocr import (
     OCRError,
     recognize_image_url_multi,
 )
-from . import actions, extractor, fusion, judgment, policy, vision
+from . import actions, extractor, fusion, judgment, notices, policy, vision
 from .session import SessionRecord, get_session_store
 
 if TYPE_CHECKING:
@@ -198,10 +198,8 @@ async def handle_submission(
             )
             return await _handle_insufficient(bot, group_id, user_id)
 
-        policy_check = policy.get_policy().check(evidence, group_id)
-        verdict = judgment.judge_evidence(evidence)
-        reject_reason = (
-            policy_check.reason if not policy_check.passed else verdict.reason
+        reject_reason = await _decide_reject_reason(
+            evidence, group_id, bot, user_id, record
         )
 
         if reject_reason is not None:
@@ -217,6 +215,58 @@ async def handle_submission(
         return await _vision_review(bot, group_id, user_id, image_url, record)
     finally:
         store.release(str(group_id), str(user_id))
+
+
+async def _decide_reject_reason(
+    evidence: ReadingEvidence,
+    group_id: int,
+    bot: Bot,
+    user_id: int,
+    record: SessionRecord,
+) -> str | None:
+    """给出「是否拒绝」及原因；通过返回 ``None``。
+
+    依次走两关：
+
+    1. **放行策略 + FR4 综合判断**（白名单/书名/作者/「我」徽章）；
+    2. **公告闸门**（LLBot v8.3.0+ 的公告已读名单）——未确认阅读指定公告则拒绝。
+       该群未绑定公告 / 接口失败时**降级放行**（见 ``notices`` 模块）。
+
+    抽成独立函数是为了把分支挡在 :func:`handle_submission` 之外（复杂度约束）。
+    """
+    policy_check = policy.get_policy().check(evidence, group_id)
+    verdict = judgment.judge_evidence(evidence)
+    reject_reason = policy_check.reason if not policy_check.passed else verdict.reason
+    if reject_reason is not None:
+        return reject_reason
+
+    gate = await notices.check_notice_read(bot, group_id, user_id)
+    await _record_event(
+        record,
+        event_type="verify.notice_gate",
+        success=not gate.blocked,
+        detail=gate.detail,
+    )
+    if not gate.blocked:
+        return None
+
+    logger.info(
+        "公告闸门拦截 group={} user={} detail={} trace={}",
+        group_id,
+        user_id,
+        gate.detail,
+        record.trace_id,
+    )
+    return _notice_gate_reason(gate)
+
+
+def _notice_gate_reason(gate: notices.NoticeGate) -> str:
+    """公告闸门的拒绝原因（带上未读的公告 id，方便管理员对照）。"""
+    unread = gate.detail.get("unread") or []
+    reason = gate.reason or "未确认阅读群公告"
+    if unread:
+        return f"{reason}：{'、'.join(str(item) for item in unread)}"
+    return reason
 
 
 async def _handle_vision_fallback(
@@ -1399,7 +1449,8 @@ async def _record_event(
 
     事件类型覆盖全部流程节点：verify.start / verify.pass / verify.reject /
     verify.timeout / verify.reminder / verify.admin_timeout / verify.admin_keep /
-    verify.admin_kick / verify.review / verify.retry / verify.download_fail。
+    verify.admin_kick / verify.review / verify.retry / verify.download_fail /
+    verify.notice_gate。
     """
     if record is None or not plugin_config.fanqie_message_store_enabled:
         return

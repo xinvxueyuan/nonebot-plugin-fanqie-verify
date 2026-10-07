@@ -22,6 +22,12 @@ from nonebot.adapters.onebot.v11.message import Message, MessageSegment
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 
+from ......handle.qq.commands.notice import (
+    notice_bind_cmd,
+    notice_list_cmd,
+    notice_show_cmd,
+    notice_unbind_cmd,
+)
 from ......handle.qq.commands.verification import (
     _is_sticker,
     approve_cmd,
@@ -52,6 +58,8 @@ from ......services.verification import (
     handle_member_left,
     handle_private_submission,
     handle_submission,
+    notice_render,
+    notices as notice_service,
     reload_policy,
     review_verification,
     start_verification,
@@ -1014,3 +1022,332 @@ async def on_extend(
             scoped_all=True,
         )
     await _send_extend_reply(bot, event, reply)
+
+
+# ---------------------------------------------------------------------------
+# 群公告命令（LLBot v8.3.0+ 新增接口）
+# ---------------------------------------------------------------------------
+
+
+def _parse_notice_ids(args: Message) -> list[str]:
+    """从命令参数里取公告 id（空白分隔，去重保序）。"""
+    ids: list[str] = []
+    for segment in args:
+        if segment.type != "text":
+            continue
+        for token in str(segment.data.get("text") or "").split():
+            if token and token not in ids:
+                ids.append(token)
+    return ids
+
+
+def _fmt_publish_time(timestamp: int) -> str:
+    """发布时间（unix 秒）→ 本地时间文本；0 或异常值返回空串。"""
+    if timestamp <= 0:
+        return ""
+    try:
+        return (
+            datetime
+            .fromtimestamp(timestamp, tz=UTC)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M")
+        )
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def _card_fallback_text(card: notice_render.Card) -> str:
+    """渲染失败时的纯文本降级（把图片内容排成文本）。"""
+    lines = [card.title, *card.lines]
+    for row in card.rows[: notice_render.MAX_ROWS]:
+        parts = [row.id_text]
+        if row.badge:
+            parts.append(f"[{row.badge}]")
+        if row.preview:
+            parts.append(row.preview)
+        if row.meta:
+            parts.append(f"({row.meta})")
+        lines.append(" ".join(parts))
+    hidden = len(card.rows) - notice_render.MAX_ROWS
+    if hidden > 0:
+        lines.append(f"…另有 {hidden} 条未显示")
+    if card.footer:
+        lines.append(card.footer)
+    return "\n".join(lines)
+
+
+async def _send_notice_card(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+    card: notice_render.Card,
+    text: str,
+) -> None:
+    """优先发渲染图；渲染不通时回退纯文本（命令不能表现为「没反应」）。"""
+    png = await notice_render.render_card(card)
+    if png is not None:
+        message = MessageSegment.at(event.user_id) + MessageSegment.image(png)
+    else:
+        message = MessageSegment.at(event.user_id) + f" {text}"
+    await bot.send_group_msg(
+        group_id=event.group_id,
+        message=MessageSegment.reply(event.message_id) + message,
+    )
+
+
+@_register(notice_list_cmd)
+async def on_notice_list(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
+    """获取群公告列表：把客户端隐藏的 ``notice_id`` 打出来供绑定。"""
+    notices = await notice_service.fetch_group_notices(bot, event.group_id)
+    if notices is None:
+        await _send_notice_card(
+            bot,
+            event,
+            notice_render.Card(
+                title="获取群公告列表失败",
+                lines=[
+                    "调用公告接口失败，可能原因：",
+                    "• LLBot 版本低于 v8.3.0（缺公告接口）",
+                    "• LLBot 与 QQ 断开（未登录）",
+                    "• 机器人不是该群管理员，无群公告权限",
+                ],
+                tone="error",
+            ),
+            "获取群公告列表失败：调用公告接口出错，请确认 LLBot ≥ v8.3.0 且已登录。",
+        )
+        return
+
+    bindings = await notice_service.load_bindings()
+    bound = set(bindings.get(event.group_id, ()))
+    rows: list[notice_render.Row] = []
+    bindable_count = 0
+    for notice in notices:
+        can, _reason = notice_service.is_bindable(notice)
+        if can:
+            bindable_count += 1
+        badge = "可作验证公告" if can else "未开确认"
+        if notice.notice_id in bound:
+            badge += " / 已绑定"
+        meta_bits = []
+        published = _fmt_publish_time(notice.publish_time)
+        if published:
+            meta_bits.append(f"发布 {published}")
+        if notice.pinned:
+            meta_bits.append("置顶")
+        rows.append(
+            notice_render.Row(
+                id_text=notice.notice_id,
+                badge=badge,
+                badge_warn=not can,
+                preview=notice.preview or "（无正文）",
+                meta="  ".join(meta_bits),
+            )
+        )
+
+    footer = (
+        f"共 {len(notices)} 条公告，其中 {bindable_count} 条"
+        "带「确认阅读」可作验证公告。" + "\n"
+        "用「设为验证公告 <公告id>」绑定（可写多个 id，空格分隔）。"
+    )
+    card = notice_render.Card(
+        title="本群公告列表",
+        lines=["「公告id」是 QQ 客户端隐藏的值，绑定验证公告时要用它。"],
+        rows=rows,
+        tone="info",
+        footer=footer,
+    )
+    await _send_notice_card(bot, event, card, _card_fallback_text(card))
+
+
+@_register(notice_show_cmd)
+async def on_notice_show(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
+    """查看验证公告：本群已绑定的验证公告及其阅读情况。"""
+    bindings = await notice_service.load_bindings()
+    bound = list(bindings.get(event.group_id, ()))
+    if not bound:
+        card = notice_render.Card(
+            title="本群未设置验证公告",
+            lines=[
+                "当前新成员入群验证**不检查**群公告阅读情况。",
+                "先用「获取群公告列表」查公告 id，再「设为验证公告 <id>」。",
+            ],
+            tone="warn",
+        )
+        await _send_notice_card(bot, event, card, _card_fallback_text(card))
+        return
+
+    live = await notice_service.fetch_group_notices(bot, event.group_id)
+    by_id = {notice.notice_id: notice for notice in live} if live is not None else {}
+    rows: list[notice_render.Row] = []
+    for notice_id in bound:
+        notice = by_id.get(notice_id)
+        if live is None:
+            badge, warn, preview = "接口不可用", True, "（当前无法核对公告内容）"
+        elif notice is None:
+            badge, warn, preview = "公告已不存在", True, "（可能已被删除）"
+        else:
+            badge, warn, preview = "已绑定", False, notice.preview or "（无正文）"
+        rows.append(
+            notice_render.Row(
+                id_text=notice_id,
+                badge=badge,
+                badge_warn=warn,
+                preview=preview,
+            )
+        )
+
+    card = notice_render.Card(
+        title="本群验证公告",
+        lines=["未确认阅读**全部**下列公告的新成员，验证会被判不通过。"],
+        rows=rows,
+        tone="info",
+        footer=(
+            "用「取消验证公告 <id>」解除绑定。\n"
+            "接口不可用 / 群内未绑定公告时，验证**不拦截**（降级放行）。"
+        ),
+    )
+    await _send_notice_card(bot, event, card, _card_fallback_text(card))
+
+
+@_register(notice_bind_cmd)
+async def on_notice_bind(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+) -> None:
+    """设为验证公告：逐个校验是否带确认环节，跳过不合格的并汇报。"""
+    requested = _parse_notice_ids(args)
+    if not requested:
+        await _send_notice_card(
+            bot,
+            event,
+            notice_render.Card(
+                title="用法",
+                lines=[
+                    "设为验证公告 <公告id> [公告id...]",
+                    "公告 id 用「获取群公告列表」查询。",
+                ],
+                tone="warn",
+            ),
+            "用法：设为验证公告 <公告id> [公告id...]（id 用「获取群公告列表」查）",
+        )
+        return
+
+    live = await notice_service.fetch_group_notices(bot, event.group_id)
+    if live is None:
+        await _send_notice_card(
+            bot,
+            event,
+            notice_render.Card(
+                title="设为验证公告失败",
+                lines=[
+                    "无法读取本群公告列表，不能校验公告是否带确认环节。",
+                    "请确认 LLBot ≥ v8.3.0、QQ 已登录、机器人为群管理员。",
+                ],
+                tone="error",
+            ),
+            "设为验证公告失败：读不到群公告列表（公告 id 必须校验后才能绑定）。",
+        )
+        return
+
+    ok, skipped = notice_service.resolve_bindable(live, requested)
+    added, already = (
+        await notice_service.bind_notices(
+            event.group_id, [notice.notice_id for notice in ok]
+        )
+        if ok
+        else ([], [])
+    )
+
+    lines: list[str] = []
+    if added:
+        lines.append(f"本次新增 {len(added)} 条：{'、'.join(added)}")
+    if already:
+        lines.append(f"已在绑定中（跳过）：{'、'.join(already)}")
+    rows: list[notice_render.Row] = []
+    for notice_id, reason in skipped:
+        rows.append(
+            notice_render.Row(
+                id_text=notice_id,
+                badge="跳过",
+                badge_warn=True,
+                preview=reason,
+            )
+        )
+    if not added and not already:
+        lines.append("没有成功绑定任何公告。")
+    current = (await notice_service.load_bindings()).get(event.group_id, ())
+    footer = f"本群当前共绑定 {len(current)} 条验证公告。"
+    card = notice_render.Card(
+        title="设为验证公告",
+        lines=lines,
+        rows=rows,
+        tone="success" if added else "warn",
+        footer=footer,
+    )
+    await _send_notice_card(bot, event, card, _card_fallback_text(card))
+
+
+@_register(notice_unbind_cmd)
+async def on_notice_unbind(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+) -> None:
+    """取消验证公告：解绑指定 id（或用「全部」清空本群绑定）。"""
+    tokens = _parse_notice_ids(args)
+    bindings = await notice_service.load_bindings()
+    bound = list(bindings.get(event.group_id, ()))
+    if not tokens:
+        await _send_notice_card(
+            bot,
+            event,
+            notice_render.Card(
+                title="用法",
+                lines=[
+                    "取消验证公告 <公告id> [公告id...]",
+                    "取消验证公告 全部   ← 清空本群绑定",
+                ],
+                tone="warn",
+            ),
+            "用法：取消验证公告 <公告id>... 或「取消验证公告 全部」",
+        )
+        return
+    if not bound:
+        await _send_notice_card(
+            bot,
+            event,
+            notice_render.Card(title="本群未设置验证公告", tone="warn"),
+            "本群未设置验证公告，无需取消。",
+        )
+        return
+
+    if any(token in {"全部", "all"} for token in tokens):
+        await notice_service.save_bindings({
+            group_id: ids
+            for group_id, ids in (await notice_service.load_bindings()).items()
+            if group_id != event.group_id
+        })
+        card = notice_render.Card(
+            title="已清空验证公告",
+            lines=[f"本群原有 {len(bound)} 条绑定已全部取消。"],
+            tone="success",
+        )
+        await _send_notice_card(bot, event, card, _card_fallback_text(card))
+        return
+
+    removed, missing = await notice_service.unbind_notices(event.group_id, tokens)
+    lines = []
+    if removed:
+        lines.append(f"已取消 {len(removed)} 条：{'、'.join(removed)}")
+    if missing:
+        lines.append(f"本来就没绑定（忽略）：{'、'.join(missing)}")
+    if not removed:
+        lines.append("没有取消任何绑定。")
+    left = list((await notice_service.load_bindings()).get(event.group_id, ()))
+    card = notice_render.Card(
+        title="取消验证公告",
+        lines=lines,
+        tone="success" if removed else "warn",
+        footer=f"本群剩余绑定 {len(left)} 条。",
+    )
+    await _send_notice_card(bot, event, card, _card_fallback_text(card))

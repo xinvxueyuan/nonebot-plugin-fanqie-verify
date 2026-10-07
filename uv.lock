@@ -493,6 +493,15 @@ wheels = [
 ]
 
 [[package]]
+name = "markdown"
+version = "3.11"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/4f/700155c8c20d9e655dd0732b5fc3c7614f291b9148da271d7388e50bf774/markdown-3.11.tar.gz", hash = "sha256:180224db6aed87ba9ce1f2781ebcd5826253de8ff637112090e24b84502bbf9f", size = 485623, upload-time = "2026-09-25T13:46:23.473Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/1e/32971905a7ab47f8b66866ed949fa48b104ba1c4a6fa57794c4f2c4b2cb8/markdown-3.11-py3-none-any.whl", hash = "sha256:cd6c89e7eb308c8b332ed673215a52d208a43f8bacc030b1419376129408719e", size = 111296, upload-time = "2026-09-25T13:46:22.163Z" },
+]
+
+[[package]]
 name = "markdown-it-py"
 version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -691,6 +700,11 @@ dependencies = [
     { name = "rtoml" },
 ]
 
+[package.optional-dependencies]
+htmlkit = [
+    { name = "nonebot-plugin-htmlkit" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "nb-cli" },
@@ -721,12 +735,14 @@ test = [
 requires-dist = [
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "nonebot-adapter-onebot", specifier = ">=2.4.6" },
+    { name = "nonebot-plugin-htmlkit", marker = "extra == 'htmlkit'", specifier = "==0.1.0rc5" },
     { name = "nonebot-plugin-localstore", specifier = ">=0.7.4" },
     { name = "nonebot-plugin-orm", extras = ["aiosqlite"], specifier = ">=0.8.3" },
     { name = "nonebot2", extras = ["fastapi", "httpx", "websockets"], specifier = ">=2.5.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "rtoml", specifier = ">=0.13.0" },
 ]
+provides-extras = ["htmlkit"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -752,6 +768,40 @@ test = [
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "pytest-sqlalchemy", specifier = ">=0.3.0" },
     { name = "respx", specifier = ">=0.21.0" },
+]
+
+[[package]]
+name = "nonebot-plugin-htmlkit"
+version = "0.1.0rc5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiofiles" },
+    { name = "jinja2" },
+    { name = "markdown" },
+    { name = "nonebot2" },
+    { name = "pygments" },
+    { name = "pymdown-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/29/79/7f0b60a19132e335cb2d6ec2902e330afc97e82462dc152ae033864acf25/nonebot_plugin_htmlkit-0.1.0rc5.tar.gz", hash = "sha256:5c9fc3ed1d1cbf95711006761d19e7a1dc0d0e8b7989c2e806a2bff3aeff7b17", size = 65089, upload-time = "2026-01-17T12:54:01.959Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c8/36/66cedb5d3170c24ec3261392c090c830bb921570f9373c2686c26495973d/nonebot_plugin_htmlkit-0.1.0rc5-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:3d495d8b7e7fa22f45a21ee4bbd1052fd12a4236aee23396f9e5de71eb66189f", size = 6842648, upload-time = "2026-01-17T12:53:39.564Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/68/330b0a4cc81d82ca382f9a5f464939cdfb3482cf29e27c7f4e40278b5884/nonebot_plugin_htmlkit-0.1.0rc5-cp310-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:ef8348e1433bbfe178e668acb7c46994c0a6cfa2f30446abbf7f8f08ffb25bd6", size = 8866549, upload-time = "2026-01-17T12:53:56.172Z" },
+    { url = "https://files.pythonhosted.org/packages/2f/96/2385871a9d23601fb2c8fc933c145b8fb8776edc65d873b122df3eea0f6c/nonebot_plugin_htmlkit-0.1.0rc5-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:74b35033fd0d23e9d5c9a509b596c522630aafcfc2a2f37c605a9c5b36ce8138", size = 9276525, upload-time = "2026-01-17T12:53:41.618Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/a2/b2f20c9a87c4b1a3b88b5481407095b7aa03b7a0811b34325847b0751b14/nonebot_plugin_htmlkit-0.1.0rc5-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:c1c5550490a9efbfbf491f9ab42fadf347af81fc214e113773ff77bd72c4c095", size = 10103686, upload-time = "2026-01-17T12:53:37.478Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/b2/750298c5c1c35ec208370494d659437da82635190755df076c7771baaca7/nonebot_plugin_htmlkit-0.1.0rc5-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:4921f529a6eec4b7f4cf3085d8cf9ca2617029e62c43631561a1188f9eadc9bc", size = 10371929, upload-time = "2026-01-17T12:54:02.977Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/b7/14cf8b2d1984c56cc2214665f3d2b382400c8dc423c6642cc1ed31939d15/nonebot_plugin_htmlkit-0.1.0rc5-cp310-abi3-win_amd64.whl", hash = "sha256:e8c49e8618fae48b6a499af416fe2725c324b159eec5d6694352d275c7f598f5", size = 7270297, upload-time = "2026-01-17T12:53:28.157Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/13/b76bf3fc1f8a2ac48616a6420c682662566bf9965e2d3daec17ca6d4040a/nonebot_plugin_htmlkit-0.1.0rc5-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:b60f891c21da4ff024773eca695dcc92ae648656c7be8a2f1c9839c052971d8b", size = 6842579, upload-time = "2026-01-17T12:53:54.641Z" },
+    { url = "https://files.pythonhosted.org/packages/85/98/15d572a75544e1bf7901cf465a4f1f5d17fff6d1c3e93c210bd688409630/nonebot_plugin_htmlkit-0.1.0rc5-cp312-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:0a105bcc2714ef1bb07b689af74bda3ba3165a19f061bf1177bf8b5b0a3c9411", size = 8865642, upload-time = "2026-01-17T12:54:12.881Z" },
+    { url = "https://files.pythonhosted.org/packages/42/89/52b440b99c40930bf9ec26b5479f6b9355021533b01cd7354b727d36c805/nonebot_plugin_htmlkit-0.1.0rc5-cp312-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:30dff5ea120ee64c042112c1bf968de6929ee48e903504ca6e5221ad6d61ba90", size = 9275035, upload-time = "2026-01-17T12:54:10.509Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/31/0dc54b1469ac81186521a4814d4688923c6e28e19b1d487f569c30f3983b/nonebot_plugin_htmlkit-0.1.0rc5-cp312-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:c452af6bb67738d54a0d6ba29ba81a4e1117f32c8b3686d1ab33f977c95fd473", size = 10102799, upload-time = "2026-01-17T12:53:30.291Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/cf/cb94ceba5472eb10412345840418ca9bf535aad32d7a9c53562a8ca25c20/nonebot_plugin_htmlkit-0.1.0rc5-cp312-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:34dd2ed57748bcd7480da3938a3753de333d5c69cf3488188dc139890e8942fb", size = 10371308, upload-time = "2026-01-17T12:54:08.588Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/1f/702efa35ff59feb30799d3a8f1978719facd8bab286cc5f141136b91df1a/nonebot_plugin_htmlkit-0.1.0rc5-cp312-abi3-win_amd64.whl", hash = "sha256:97d39efcb1d82e7f7a3daf2f6903baacadcce84cfd978fef486c8e1183a4dc55", size = 7270093, upload-time = "2026-01-17T12:54:05.037Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/96/5e38c12111a71646ffe1f0efa8e7468e89699feda34326d42a4de7b994c5/nonebot_plugin_htmlkit-0.1.0rc5-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:72b12faf497fce1e50ba121092221073f9db3db5fad21afcd0902a9ef4b8e00f", size = 6843591, upload-time = "2026-01-17T12:54:00.789Z" },
+    { url = "https://files.pythonhosted.org/packages/db/c3/a26909de1e7bffb84108128defe848bf4e16d8a3f40ef7a27f2aaffabc8e/nonebot_plugin_htmlkit-0.1.0rc5-cp313-cp313t-manylinux_2_34_aarch64.whl", hash = "sha256:c4c240d6b9bf61a53230634abc6f6a20f075c8934dbcd821639b78e83fbeb789", size = 8865919, upload-time = "2026-01-17T12:53:43.945Z" },
+    { url = "https://files.pythonhosted.org/packages/15/f9/3a8e874036e6c73ecf9221d05502d6681fce1268d61e7f379c98cefd4a54/nonebot_plugin_htmlkit-0.1.0rc5-cp313-cp313t-manylinux_2_34_x86_64.whl", hash = "sha256:0cf8e51662bf082d5d89e2c1f3c24463eedcf2516da3e64475bd75914485cdb1", size = 9275043, upload-time = "2026-01-17T12:54:15.239Z" },
+    { url = "https://files.pythonhosted.org/packages/14/62/85037e9cdc8467eb75dfeaea0519a929bf390100fe0f4a5fa5faf0dcc647/nonebot_plugin_htmlkit-0.1.0rc5-cp313-cp313t-musllinux_1_2_aarch64.whl", hash = "sha256:4ea2a9d524f78b11107fe6736388926ee61f87d5acfe1dd4b50fdcaeaa23f166", size = 10103189, upload-time = "2026-01-17T12:54:06.608Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/48/b49732b8a67e6aaebdbf9dc4361052328872f46ad67796315e08f8ad6a44/nonebot_plugin_htmlkit-0.1.0rc5-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:9d6224ed8a05e41afebe2df285aaf661644268dc399e73bceb8999d2c568cdd8", size = 10371569, upload-time = "2026-01-17T12:53:46.482Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/84/18ca0644c94ecd9a6504cedba3ba0585878512ec844858011639ca74b17c/nonebot_plugin_htmlkit-0.1.0rc5-cp313-cp313t-win_amd64.whl", hash = "sha256:271dfddaab7f7f88a5ae61d401c58aa4d6c334d3fc5dcefb4a82b85084b5df85", size = 7271113, upload-time = "2026-01-17T12:53:48.347Z" },
 ]
 
 [[package]]
@@ -1023,6 +1073,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b9/13/55deec25bf09383216fa7f1dfcdbfca40a04aa00b6d15a5cbf25af8fce5f/pygtrie-2.5.0.tar.gz", hash = "sha256:203514ad826eb403dab1d2e2ddd034e0d1534bbe4dbe0213bb0593f66beba4e2", size = 39266, upload-time = "2022-07-16T14:29:47.459Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/cd/bd196b2cf014afb1009de8b0f05ecd54011d881944e62763f3c1b1e8ef37/pygtrie-2.5.0-py3-none-any.whl", hash = "sha256:8795cda8105493d5ae159a5bef313ff13156c5d4d72feddefacaad59f8c8ce16", size = 25099, upload-time = "2022-09-23T20:30:05.12Z" },
+]
+
+[[package]]
+name = "pymdown-extensions"
+version = "12.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2a/94/858e0163cb4d83d6d8234018a01792c749a56daee41794cac7d6c46661e8/pymdown_extensions-12.1.tar.gz", hash = "sha256:fdb8f47f5d7fd069d10ef2a7d8908e613d7865ff0419d544a0ffd3984e884f11", size = 868245, upload-time = "2026-09-23T00:08:42Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/36/d1/98313da89960a604402266a115311b510254900ff1295ea426403f9423cc/pymdown_extensions-12.1-py3-none-any.whl", hash = "sha256:4a254b771acfcddc6c110a7f4590d818f1f849e2d5aacf69b4b07c8dd2a9700d", size = 277069, upload-time = "2026-09-23T00:08:40.069Z" },
 ]
 
 [[package]]

@@ -76,6 +76,12 @@ class Config(BaseModel):
         fanqie_private_verify_enabled: 是否启用「私聊发图完成验证」通道。
             为 False 时停用私聊图片验证与「验证 <群号>」选群命令，仅保留
             群内验证。默认 True（启用）。
+        fanqie_notice_gate_enabled: 是否启用「群公告已读」闸门。开启后，
+            已用「设为验证公告」绑定公告的群里，未确认阅读全部绑定公告的
+            新成员判**不通过**；该群未绑定公告、或查询接口调用失败时
+            **不拦**（降级放行并在流程事件里记明细）。需要 LLBot v8.3.0+
+            （提供 ``get_group_notice_acklist``）。默认 True（启用闸门，
+            未绑定公告的群不受影响）。
         fanqie_allow_group_admin_commands: 是否允许群内管理员（admin/群主）
             使用 /keep、/kick 等命令。为 True 时，除配置的管理员外，
             群内的管理员与群主也可执行；为 False 时仅配置的管理员可执行。
@@ -102,6 +108,7 @@ class Config(BaseModel):
     fanqie_extend_default_hours: int = 6
     fanqie_extend_max_hours: int = 48
     fanqie_private_verify_enabled: bool = True
+    fanqie_notice_gate_enabled: bool = True
     fanqie_response_timeout: int = 600
     fanqie_max_attempts: int = 3
     fanqie_admin_decision_timeout: int = 57600  # 16 小时（秒）

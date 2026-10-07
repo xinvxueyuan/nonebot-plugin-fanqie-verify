@@ -67,15 +67,19 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(autouse=True)
 def _fresh_config_files() -> None:
-    """每个测试前删除策略文件，保证从代码默认值重新生成。"""
+    """每个测试前删除策略文件与公告绑定文件，保证从代码默认值重新生成。"""
     from nonebot_plugin_localstore import get_config_file
 
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification.notices import (
+        NOTICES_FILENAME,
+    )
     from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
         _PLUGIN_NAME,
         _POLICY_FILENAME,
     )
 
     get_config_file(_PLUGIN_NAME, _POLICY_FILENAME).unlink(missing_ok=True)
+    get_config_file(_PLUGIN_NAME, NOTICES_FILENAME).unlink(missing_ok=True)
 
 
 def pytest_unconfigure() -> None:

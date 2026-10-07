@@ -35,6 +35,11 @@ dependencies = [
 Homepage = "https://github.com/xinvxueyuan/nonebot-plugin-fanqie-verify"
 Repository = "https://github.com/xinvxueyuan/nonebot-plugin-fanqie-verify"
 
+[project.optional-dependencies]
+# 群公告命令的图片渲染（「获取群公告列表」等）。选装：未安装时这些命令
+# 自动回退纯文本，不影响入群验证主流程。
+htmlkit = ["nonebot-plugin-htmlkit==0.1.0rc5"]
+
 [dependency-groups]
 dev = [
     { include-group = "lint" },
