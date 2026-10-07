@@ -218,6 +218,63 @@ async def test_notice_bind_skips_unconfirmed_and_reports(
 
 
 @pytest.mark.asyncio
+async def test_notice_bind_by_index(app: App, sent: list[dict[str, Any]]) -> None:
+    """用**序号**绑定（公告 id 太长，用户 2026-10-07 要求用序号代替）。"""
+    from nonebot.adapters.onebot.v11 import Bot
+
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
+        notices,
+    )
+
+    async with app.test_matcher(notice_cmd.notice_bind_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot)
+        ctx.should_call_api(
+            "_get_group_notice",
+            {"group_id": _GROUP_ID},
+            result=[
+                _raw_notice("AAA", confirm=True),  # 序号 1
+                _raw_notice("BBB", confirm=False),  # 序号 2（未开确认 → 跳过）
+                _raw_notice("CCC", confirm=True),  # 序号 3
+            ],
+        )
+        ctx.receive_event(bot, _event("设为验证公告 1 3"))
+
+    # 序号被翻译成真实 id 后再校验与写入（存的是 id，不是序号）
+    assert (await notices.load_bindings())[_GROUP_ID] == ("AAA", "CCC")
+    text = _last_text(sent)
+    assert "AAA" in text and "CCC" in text
+
+
+@pytest.mark.asyncio
+async def test_notice_bind_by_index_skips_unconfirmed(
+    app: App, sent: list[dict[str, Any]]
+) -> None:
+    """按序号绑定时同样要校验确认环节（序号 2 未开确认 → 跳过并汇报）。"""
+    from nonebot.adapters.onebot.v11 import Bot
+
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
+        notices,
+    )
+
+    async with app.test_matcher(notice_cmd.notice_bind_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot)
+        ctx.should_call_api(
+            "_get_group_notice",
+            {"group_id": _GROUP_ID},
+            result=[
+                _raw_notice("AAA", confirm=True),
+                _raw_notice("BBB", confirm=False),
+            ],
+        )
+        ctx.receive_event(bot, _event("设为验证公告 2"))
+
+    assert _GROUP_ID not in await notices.load_bindings()
+    text = _last_text(sent)
+    assert "BBB" in text
+    assert "确认" in text  # 未开确认的原因
+
+
+@pytest.mark.asyncio
 async def test_notice_bind_reports_existing_as_skipped(
     app: App, sent: list[dict[str, Any]]
 ) -> None:

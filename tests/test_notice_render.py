@@ -114,6 +114,21 @@ def test_build_html_declares_cjk_font_stack() -> None:
     assert "WenQuanYi Zen Hei" in html or "Noto Sans CJK SC" in html
 
 
+def test_render_scales_up_card_metrics() -> None:
+    """卡片必须按 SCALE 放大 —— htmlkit 的 dpi 无效，只能放大内容（用户反馈图太小）。"""
+    html = notice_render.build_html(_card())
+
+    assert notice_render.SCALE > 1.0
+    assert (
+        round(notice_render.MAX_WIDTH * notice_render.SCALE)
+        == notice_render.RENDER_MAX_WIDTH
+    )
+    # 卡片宽度与字号都应带上放大后的像素值（而不是原始 px）
+    assert f"width: {notice_render.RENDER_CARD_WIDTH}px" in html
+    assert f"font-size: {round(26 * notice_render.SCALE)}px" in html
+    assert f": {notice_render.CARD_WIDTH}px" not in html
+
+
 def test_build_html_uses_tone_color() -> None:
     """语气色要落进 CSS（错误卡片与成功卡片应可区分）。"""
     error_html = notice_render.build_html(_card(tone="error"))
@@ -139,7 +154,7 @@ async def test_render_card_returns_png() -> None:
 
     assert result == b"PNGDATA"
     assert "123456" in captured["html"]
-    assert captured["max_width"] == notice_render.MAX_WIDTH
+    assert captured["max_width"] == notice_render.RENDER_MAX_WIDTH
 
 
 @pytest.mark.asyncio
@@ -163,7 +178,7 @@ async def test_render_card_never_raises_when_renderer_fails() -> None:
     async def failing(html: str, *, max_width: int | None = None) -> bytes:
         # 顺带锁定调用契约：渲染器拿到的是非空 HTML 与约定的最大宽度
         assert html
-        assert max_width == notice_render.MAX_WIDTH
+        assert max_width == notice_render.RENDER_MAX_WIDTH
         raise RuntimeError("渲染器崩了")
 
     notice_render._load_htmlkit = lambda: failing  # type: ignore[assignment]

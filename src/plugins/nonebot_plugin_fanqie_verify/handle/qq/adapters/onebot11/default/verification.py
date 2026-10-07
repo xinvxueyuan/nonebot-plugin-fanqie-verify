@@ -40,7 +40,6 @@ from ......handle.qq.commands.verification import (
     group_increase,
     image_submission,
     keep_cmd,
-    kick_cmd,
     pending_list_cmd,
     private_image_submission,
     processing_cmd,
@@ -238,6 +237,28 @@ async def on_image_submission(
         image_url=_image_url(event),
         reply_message_id=event.message_id,
     )
+    await _send_member_reply(bot, event, reply)
+
+
+async def _send_member_reply(
+    bot: OneBot11Bot,
+    event: GroupMessageEvent,
+    reply: str | notice_render.Card,
+) -> None:
+    """把流程返回值发给成员：卡片走渲染出图，纯文本直接发。
+
+    卡片渲染失败时 ``_send_notice_card`` 会回退纯文本 —— 成员端绝不会「没反应」。
+    """
+    if isinstance(reply, notice_render.Card):
+        await _send_notice_card(
+            bot,
+            event,
+            reply,
+            _card_fallback_text(reply),
+            reply_to_message_id=event.message_id,
+            at_user_id=event.user_id,
+        )
+        return
     message = (
         MessageSegment.reply(event.message_id)
         + MessageSegment.at(event.user_id)
@@ -274,7 +295,11 @@ async def on_private_image_submission(
         user_id=int(event.user_id),
         image_url=_image_url(event),
     )
-    await bot.send_private_msg(user_id=int(event.user_id), message=reply)
+    # 私聊不推图（成员可能只想快速看到结论）：卡片转成与卡片同口径的纯文本。
+    text = (
+        _card_fallback_text(reply) if isinstance(reply, notice_render.Card) else reply
+    )
+    await bot.send_private_msg(user_id=int(event.user_id), message=text)
 
 
 @_register(verify_cmd)
@@ -315,43 +340,6 @@ async def on_verify_select(
     await bot.send_private_msg(
         user_id=int(event.user_id),
         message=f"已选择在群 {group_id} 验证，请发送书评详情页截图。",
-    )
-
-
-@_register(kick_cmd)
-async def on_admin_kick(
-    bot: OneBot11Bot,
-    event: GroupMessageEvent,
-    args: Message = CommandArg(),
-) -> None:
-    """FR9：管理员踢出指定成员。"""
-    from ......core.config import plugin_config
-
-    if plugin_config.fanqie_allow_group_admin_commands:
-        if not await _is_privileged(bot, event):
-            return
-    elif not _is_admin_user(event):
-        return
-    target_user_id = _extract_target_user(args, event)
-    if target_user_id is None:
-        hint = MessageSegment.at(event.user_id) + (
-            " 请提供成员 QQ 号，例如：/kick 123456"
-        )
-        await bot.send_group_msg(
-            group_id=event.group_id,
-            message=MessageSegment.reply(event.message_id) + hint,
-        )
-        return
-    reply = await admin_decision(
-        bot,
-        group_id=event.group_id,
-        user_id=target_user_id,
-        keep=False,
-        reply_message_id=event.message_id,
-    )
-    await bot.send_group_msg(
-        group_id=event.group_id,
-        message=MessageSegment.reply(event.message_id) + reply,
     )
 
 
@@ -504,7 +492,7 @@ async def on_admin_pending_list(
                 hours += 1
                 minutes = 0
             left = f"{hours} 小时 {minutes} 分" if hours else f"{minutes} 分"
-            lines.append(f"QQ {record.user_id}（剩余 {left}，/keep 或 /kick）")
+            lines.append(f"QQ {record.user_id}（剩余 {left}，/keep 放行）")
         reply = f"等待管理员决策的成员 {len(records)} 人：\n" + "\n".join(lines)
     await bot.send_group_msg(
         group_id=event.group_id,
@@ -535,7 +523,7 @@ async def on_processing_list(
             exp = _ensure_aware(record.expires_at) or now
             remaining = max(0, int((exp - now).total_seconds()))
             minutes = (remaining + 59) // 60
-            lines.append(f"QQ {record.user_id}（剩余 {minutes} 分，/keep 或 /kick）")
+            lines.append(f"QQ {record.user_id}（剩余 {minutes} 分，/keep 放行）")
         reply = f"等待提交截图的成员 {len(records)} 人：\n" + "\n".join(lines)
     await bot.send_group_msg(
         group_id=event.group_id,
@@ -1081,16 +1069,33 @@ async def _send_notice_card(
     event: GroupMessageEvent,
     card: notice_render.Card,
     text: str,
+    *,
+    reply_to_message_id: int | None = None,
+    at_user_id: int | None = None,
 ) -> None:
-    """优先发渲染图；渲染不通时回退纯文本（命令不能表现为「没反应」）。"""
+    """优先发渲染图；渲染不通时回退纯文本（命令不能表现为「没反应」）。
+
+    Args:
+        bot: 当前 Bot 实例。
+        event: 触发命令的群消息事件（提供群号与默认引用/@ 目标）。
+        card: 要渲染的卡片内容。
+        text: 渲染失败时回退的纯文本（须与卡片口径一致）。
+        reply_to_message_id: 需要引用某条消息时传入（默认引用触发命令的消息）。
+        at_user_id: 需要 @ 的成员；默认 @ 触发者。
+
+    """
+    target_user_id = at_user_id if at_user_id is not None else event.user_id
+    anchor = (
+        reply_to_message_id if reply_to_message_id is not None else event.message_id
+    )
     png = await notice_render.render_card(card)
     if png is not None:
-        message = MessageSegment.at(event.user_id) + MessageSegment.image(png)
+        message = MessageSegment.at(target_user_id) + MessageSegment.image(png)
     else:
-        message = MessageSegment.at(event.user_id) + f" {text}"
+        message = MessageSegment.at(target_user_id) + f" {text}"
     await bot.send_group_msg(
         group_id=event.group_id,
-        message=MessageSegment.reply(event.message_id) + message,
+        message=MessageSegment.reply(anchor) + message,
     )
 
 
@@ -1146,11 +1151,11 @@ async def on_notice_list(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
     footer = (
         f"共 {len(notices)} 条公告，其中 {bindable_count} 条"
         "带「确认阅读」可作验证公告。" + "\n"
-        "用「设为验证公告 <公告id>」绑定（可写多个 id，空格分隔）。"
+        "用「设为验证公告 <序号>」绑定（可写多个序号，空格分隔）。"
     )
     card = notice_render.Card(
         title="本群公告列表",
-        lines=["「公告id」是 QQ 客户端隐藏的值，绑定验证公告时要用它。"],
+        lines=["下面的数字是**序号**（按本列表顺序），绑定/取消时填序号即可。"],
         rows=rows,
         tone="info",
         footer=footer,
@@ -1168,7 +1173,7 @@ async def on_notice_show(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
             title="本群未设置验证公告",
             lines=[
                 "当前新成员入群验证**不检查**群公告阅读情况。",
-                "先用「获取群公告列表」查公告 id，再「设为验证公告 <id>」。",
+                "先用「获取群公告列表」查序号，再「设为验证公告 <序号>」。",
             ],
             tone="warn",
         )
@@ -1223,12 +1228,12 @@ async def on_notice_bind(
             notice_render.Card(
                 title="用法",
                 lines=[
-                    "设为验证公告 <公告id> [公告id...]",
-                    "公告 id 用「获取群公告列表」查询。",
+                    "设为验证公告 <序号> [序号...]",
+                    "序号用「获取群公告列表」查询。",
                 ],
                 tone="warn",
             ),
-            "用法：设为验证公告 <公告id> [公告id...]（id 用「获取群公告列表」查）",
+            "用法：设为验证公告 <序号> [序号...]（序号用「获取群公告列表」查）",
         )
         return
 
@@ -1249,7 +1254,8 @@ async def on_notice_bind(
         )
         return
 
-    ok, skipped = notice_service.resolve_bindable(live, requested)
+    resolved, passthrough = notice_service.resolve_notice_tokens(live, requested)
+    ok, skipped = notice_service.resolve_bindable(live, [*resolved, *passthrough])
     added, already = (
         await notice_service.bind_notices(
             event.group_id, [notice.notice_id for notice in ok]
@@ -1304,12 +1310,12 @@ async def on_notice_unbind(
             notice_render.Card(
                 title="用法",
                 lines=[
-                    "取消验证公告 <公告id> [公告id...]",
+                    "取消验证公告 <序号> [序号...]",
                     "取消验证公告 全部   ← 清空本群绑定",
                 ],
                 tone="warn",
             ),
-            "用法：取消验证公告 <公告id>... 或「取消验证公告 全部」",
+            "用法：取消验证公告 <序号>... 或「取消验证公告 全部」",
         )
         return
     if not bound:
@@ -1335,7 +1341,21 @@ async def on_notice_unbind(
         await _send_notice_card(bot, event, card, _card_fallback_text(card))
         return
 
-    removed, missing = await notice_service.unbind_notices(event.group_id, tokens)
+    # 只有输入里出现**数字**（可能是序号）时才需要查公告列表来翻译；
+    # 纯 id 输入直接解绑，省一次接口调用（也让「公告已删除、列表拿不到」时照常可解绑）。
+    needs_index = any(token.strip().isdigit() for token in tokens)
+    live = (
+        await notice_service.fetch_group_notices(bot, event.group_id)
+        if needs_index
+        else None
+    )
+    if live is not None:
+        resolved, passthrough = notice_service.resolve_notice_tokens(live, tokens)
+        targets = [*resolved, *passthrough]
+    else:
+        # 没查列表（或列表拿不到）时按 id 处理
+        targets = tokens
+    removed, missing = await notice_service.unbind_notices(event.group_id, targets)
     lines = []
     if removed:
         lines.append(f"已取消 {len(removed)} 条：{'、'.join(removed)}")

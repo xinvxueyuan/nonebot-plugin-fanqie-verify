@@ -73,6 +73,102 @@ def _raw_notice(
 
 
 # ---------------------------------------------------------------------------
+# 0. 展示序号与闸门摘要（公告太长，对外一律用序号；回执要说明公告情况）
+# ---------------------------------------------------------------------------
+
+
+def test_notice_index_map_is_one_based_in_list_order() -> None:
+    """序号从 1 开始，且顺序与「获取群公告列表」一致。"""
+    listing = [
+        notices.parse_notice({"notice_id": "A"}),
+        notices.parse_notice({"notice_id": "B"}),
+        notices.parse_notice({"notice_id": "C"}),
+    ]
+
+    assert notices.notice_index_map(listing) == {"A": 1, "B": 2, "C": 3}
+
+
+def test_resolve_tokens_accepts_in_range_index() -> None:
+    listing = [
+        notices.parse_notice({"notice_id": "A"}),
+        notices.parse_notice({"notice_id": "B"}),
+    ]
+
+    resolved, passthrough = notices.resolve_notice_tokens(listing, ["2"])
+
+    assert resolved == ["B"]
+    assert passthrough == []
+
+
+def test_resolve_tokens_out_of_range_is_passed_through() -> None:
+    """超出范围的数字按**原样透传**（保住「已删除公告仍能单独解绑」的通道）。"""
+    listing = [notices.parse_notice({"notice_id": "A"})]
+
+    resolved, passthrough = notices.resolve_notice_tokens(listing, ["9"])
+
+    assert resolved == []
+    assert passthrough == ["9"]
+
+
+def test_resolve_tokens_passes_through_deleted_notice_id() -> None:
+    """**关键**：已删除公告（不在当前列表）的 id 必须原样透传，否则没法单独解绑。"""
+    listing = [notices.parse_notice({"notice_id": "A"})]
+
+    resolved, passthrough = notices.resolve_notice_tokens(listing, ["gone-id"])
+
+    assert resolved == []
+    assert passthrough == ["gone-id"]
+
+
+def test_resolve_tokens_accepts_raw_id_and_mixes() -> None:
+    listing = [
+        notices.parse_notice({"notice_id": "A"}),
+        notices.parse_notice({"notice_id": "B"}),
+    ]
+
+    resolved, passthrough = notices.resolve_notice_tokens(listing, ["1", "B", "1"])
+
+    assert resolved == ["A"]  # 序号解析出去重保序
+    assert passthrough == ["B"]  # 非数字原样透传
+
+
+def test_summary_describe_covers_downgrade_reasons() -> None:
+    assert "已关闭" in notices.NoticeSummary(skipped="disabled").describe()
+    assert "未设置验证公告" in notices.NoticeSummary(skipped="no_binding").describe()
+    assert "暂不可用" in notices.NoticeSummary(skipped="api_error").describe()
+
+
+def test_summary_describe_reports_confirmed_labels() -> None:
+    summary = notices.NoticeSummary(
+        bound=2,
+        confirmed=(
+            notices.ConfirmedNotice(notice_id="A", label="1"),
+            notices.ConfirmedNotice(notice_id="B", label="2"),
+        ),
+    )
+
+    text = summary.describe()
+
+    assert summary.enforced is True
+    assert "已确认阅读公告 1、2" in text
+    assert "2 条" in text
+
+
+def test_summary_describe_without_labels_reports_counts() -> None:
+    """拿不到公告列表（序号不可用）时只报条数，不猜序号。"""
+    summary = notices.NoticeSummary(
+        bound=3,
+        confirmed=(notices.ConfirmedNotice(notice_id="A"),),
+    )
+
+    assert "1/3 条" in summary.describe()
+
+
+def test_summary_not_enforced_when_no_binding() -> None:
+    assert notices.NoticeSummary(bound=0).enforced is False
+
+
+# ---------------------------------------------------------------------------
 # 1. 解析与绑定存储
 # ---------------------------------------------------------------------------
 

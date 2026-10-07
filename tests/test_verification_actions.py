@@ -141,7 +141,9 @@ def test_decorate_notice_includes_group_authors(
     notice = _decorate_notice("【验证失败】测试", 123, 10001)
 
     assert "该群允许作者：刘慈欣, 阿百川大鬼" in notice
-    assert "请在群内执行：/kick 10001 或 /keep 10001" in notice
+    assert "请在群内执行 /keep 10001 放行" in notice
+    assert "lingchu-bot 的「踢出」" in notice
+    assert "/kick" not in notice
     assert "16 小时内未处理" in notice
 
 

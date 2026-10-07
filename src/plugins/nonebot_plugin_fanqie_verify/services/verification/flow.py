@@ -24,8 +24,20 @@ from ...services.ocr import (
     OCRError,
     recognize_image_url_multi,
 )
-from . import actions, extractor, fusion, judgment, notices, policy, vision
+from . import (
+    actions,
+    extractor,
+    fusion,
+    judgment,
+    notice_render,
+    notices,
+    policy,
+    vision,
+)
 from .session import SessionRecord, get_session_store
+
+#: 面向成员的回复：纯文本（文本回退），或需要渲染成图片的卡片。
+Reply = str | notice_render.Card
 
 if TYPE_CHECKING:
     from .models import ReadingEvidence
@@ -137,7 +149,7 @@ async def handle_submission(
     user_id: int,
     image_url: str | None,
     reply_message_id: int | None = None,
-) -> str:
+) -> Reply:
     """FR2~FR8：处理新成员提交的阅读截图。
 
     Args:
@@ -162,21 +174,15 @@ async def handle_submission(
         if record is None or record.status != "waiting":
             return "当前没有待处理的验证请求。"
 
-        member = await actions.get_member_info(bot, group_id, user_id)
-        if member is None:
-            logger.info(
-                "提交处理：成员 {} 已不在群 {} 中，结束会话 trace={}",
-                user_id,
-                group_id,
-                record.trace_id,
-            )
-            store.remove(str(group_id), str(user_id))
-            return "你已不在群聊中，无需验证。"
-        if member.is_muted and not record.is_muted:
-            record = (
-                store.set_muted(str(group_id), str(user_id), is_muted=True) or record
-            )
-            await _persist_session(record)
+        early = await _sync_submitter(bot, group_id, user_id, record)
+        if early is not None:
+            return early
+        record = store.get(str(group_id), str(user_id)) or record
+
+        # 公告闸门：**先查公告、再验图**（用户 2026-10-07 拍板）。
+        gate_block = await _notice_gate_block(bot, group_id, user_id, record)
+        if gate_block is not None:
+            return gate_block
 
         if not image_url:
             return await _handle_download_failure(group_id, user_id)
@@ -198,9 +204,7 @@ async def handle_submission(
             )
             return await _handle_insufficient(bot, group_id, user_id)
 
-        reject_reason = await _decide_reject_reason(
-            evidence, group_id, bot, user_id, record
-        )
+        reject_reason = await _decide_reject_reason(evidence, group_id)
 
         if reject_reason is not None:
             logger.info(
@@ -220,17 +224,14 @@ async def handle_submission(
 async def _decide_reject_reason(
     evidence: ReadingEvidence,
     group_id: int,
-    bot: Bot,
-    user_id: int,
-    record: SessionRecord,
 ) -> str | None:
     """给出「是否拒绝」及原因；通过返回 ``None``。
 
-    依次走两关：
+    只走**一关**：放行策略 + FR4 综合判断（白名单/书名/作者/「我」徽章）。
 
-    1. **放行策略 + FR4 综合判断**（白名单/书名/作者/「我」徽章）；
-    2. **公告闸门**（LLBot v8.3.0+ 的公告已读名单）——未确认阅读指定公告则拒绝。
-       该群未绑定公告 / 接口失败时**降级放行**（见 ``notices`` 模块）。
+    公告闸门**不在这里** —— 自 2026-10-07 起它前移到 :func:`handle_submission`
+    收到图片之前执行（用户拍板「先查公告再验图」），这样 OCR 与仅视觉两条路径都会生效。
+    （此前放在本函数里，只在 OCR 路径上跑，导致生产「仅视觉」模式下闸门形同不存在。）
 
     抽成独立函数是为了把分支挡在 :func:`handle_submission` 之外（复杂度约束）。
     """
@@ -239,7 +240,53 @@ async def _decide_reject_reason(
     reject_reason = policy_check.reason if not policy_check.passed else verdict.reason
     if reject_reason is not None:
         return reject_reason
+    return None
 
+
+async def _sync_submitter(
+    bot: Bot,
+    group_id: int,
+    user_id: int,
+    record: SessionRecord,
+) -> str | None:
+    """提交前的前置校验：成员是否还在群、禁言状态同步。
+
+    Returns:
+        需要**提前结束**本次提交时的回复文本；一切正常返回 ``None``。
+
+    """
+    member = await actions.get_member_info(bot, group_id, user_id)
+    if member is None:
+        logger.info(
+            "提交处理：成员 {} 已不在群 {} 中，结束会话 trace={}",
+            user_id,
+            group_id,
+            record.trace_id,
+        )
+        get_session_store().remove(str(group_id), str(user_id))
+        return "你已不在群聊中，无需验证。"
+    if member.is_muted and not record.is_muted:
+        updated = (
+            get_session_store().set_muted(str(group_id), str(user_id), is_muted=True)
+            or record
+        )
+        await _persist_session(updated)
+    return None
+
+
+async def _notice_gate_block(
+    bot: Bot,
+    group_id: int,
+    user_id: int,
+    record: SessionRecord,
+) -> Reply | None:
+    """公告闸门：未确认阅读绑定公告时返回拒绝回执；放行返回 ``None``。
+
+    2026-10-07 前这段逻辑在 ``_decide_reject_reason`` 里（OCR 路径专属），
+    生产「仅视觉」模式下**完全没被执行过**；现前移到收到图片之前，两条路径共用。
+
+    降级语义（见 ``notices`` 模块）：未绑定 / 开关关闭 / 接口失败 → **不拦**。
+    """
     gate = await notices.check_notice_read(bot, group_id, user_id)
     await _record_event(
         record,
@@ -249,7 +296,6 @@ async def _decide_reject_reason(
     )
     if not gate.blocked:
         return None
-
     logger.info(
         "公告闸门拦截 group={} user={} detail={} trace={}",
         group_id,
@@ -257,7 +303,20 @@ async def _decide_reject_reason(
         gate.detail,
         record.trace_id,
     )
-    return _notice_gate_reason(gate)
+    return await _handle_reject(
+        bot,
+        group_id,
+        user_id,
+        _blank_evidence(),
+        _notice_gate_reason(gate),
+    )
+
+
+def _blank_evidence() -> ReadingEvidence:
+    """闸门拦截时用的空证据（此时**还没验图**，不该伪造任何提取结果）。"""
+    from .models import ReadingEvidence as _Evidence
+
+    return _Evidence()
 
 
 def _notice_gate_reason(gate: notices.NoticeGate) -> str:
@@ -275,7 +334,7 @@ async def _handle_vision_fallback(
     user_id: int,
     image_url: str,
     record: SessionRecord,
-) -> str:
+) -> Reply:
     """OCR 识别不出（或 OCR 已停用）时改用视觉模型看图判定。"""
     verdict = await vision.vision_fallback(image_url, group_id)
     if verdict is not None:
@@ -327,7 +386,7 @@ async def _vision_review(
     user_id: int,
     image_url: str,
     record: SessionRecord,
-) -> str:
+) -> Reply:
     """OCR 通过后调用视觉模型复核（第二道防线，持否决权）。
 
     视觉模型否决则拒绝；通过或不可用则放行。
@@ -534,7 +593,7 @@ async def handle_private_submission(
     *,
     user_id: int,
     image_url: str | None,
-) -> str:
+) -> Reply:
     """私聊验证入口：按账号处理新成员提交的阅读截图。
 
     私聊消息不携带群号，因此先按账号查出该用户的全部待验证等待群：
@@ -588,7 +647,7 @@ async def review_verification(
     group_id: int,
     user_id: int,
     triggered_by_admin: bool = False,
-) -> str:
+) -> Reply:
     """管理员或群成员发起“重审”：重新开启目标成员的验证流程。
 
     普通群成员（非群管理/群主）通过“重审”命令重审**自己**：
@@ -765,7 +824,8 @@ async def admin_decision(
         bot: 当前 Bot 实例。
         group_id: 群号。
         user_id: 目标成员 QQ 号。
-        keep: ``True`` 表示保留（/keep /通过），``False`` 表示踢出（/kick）。
+        keep: ``True`` 表示保留（``/keep`` / 通过）；``False`` 表示移出 ——
+            该分支自 2026-10-07 起只由**超时自动移出**调用（``/kick`` 命令已移除）。
         reply_message_id: 触发本次决策的消息 id（欢迎消息引用原消息）。
 
     Returns:
@@ -919,10 +979,17 @@ async def _handle_pass(
     bot: Bot,
     group_id: int,
     user_id: int,
-) -> str:
-    """FR5：通过验证，发送欢迎消息。"""
+) -> notice_render.Card:
+    """FR5：通过验证 —— 返回**回执卡片**（含公告确认情况）。
+
+    2026-10-07 用户指出：验证通过时完全没有任何「已确认群公告」的说明，成员与管理员
+    都无从判断公告规则是否生效。所以这里改成出卡片，并把公告摘要同时写进
+    ``verify.pass`` 事件明细（审计可查）。
+    """
     store = get_session_store()
     record = store.get(str(group_id), str(user_id))
+
+    summary = await notices.build_notice_summary(bot, group_id, user_id)
 
     member = await actions.get_member_info(bot, group_id, user_id)
     if member is None:
@@ -934,13 +1001,62 @@ async def _handle_pass(
         )
         ended = store.end(str(group_id), str(user_id), status="approved")
         await _persist_session(ended)
-        await _record_event(ended, event_type="verify.pass", success=True)
-        return "验证通过。"
+        await _record_event(
+            ended,
+            event_type="verify.pass",
+            success=True,
+            detail=_pass_detail(summary, left_group=True),
+        )
+        return notice_render.Card(
+            title="验证通过",
+            lines=[
+                "书评验证已通过（该成员已不在群内，无需欢迎）。",
+                summary.describe(),
+            ],
+            tone="success",
+        )
 
     ended = store.end(str(group_id), str(user_id), status="approved")
     await _persist_session(ended)
-    await _record_event(ended, event_type="verify.pass", success=True)
-    return "验证通过，欢迎加入本群！"
+    await _record_event(
+        ended,
+        event_type="verify.pass",
+        success=True,
+        detail=_pass_detail(summary),
+    )
+    rows = [
+        notice_render.Row(
+            id_text=f"公告 {item.label}" if item.label else "公告（序号不可用）",
+            badge="已确认",
+            preview=item.preview or "（无正文）",
+        )
+        for item in summary.confirmed
+        if summary.enforced
+    ]
+    return notice_render.Card(
+        title="验证通过",
+        lines=["书评验证已通过，欢迎加入本群！", summary.describe()],
+        rows=rows,
+        tone="success",
+    )
+
+
+def _pass_detail(
+    summary: notices.NoticeSummary, *, left_group: bool = False
+) -> dict[str, Any]:
+    """``verify.pass`` 事件明细（把公告确认情况落进审计）。"""
+    detail: dict[str, Any] = {
+        "notice_bound": summary.bound,
+        "notice_confirmed": [item.notice_id for item in summary.confirmed],
+        "notice_labels": [item.label for item in summary.confirmed],
+        "notice_enforced": summary.enforced,
+        "notice_summary": summary.describe(),
+    }
+    if summary.skipped:
+        detail["notice_skipped"] = summary.skipped
+    if left_group:
+        detail["left_group"] = True
+    return detail
 
 
 async def _handle_reject(
@@ -1020,7 +1136,8 @@ async def _await_admin_decision(
     """验证失败后转入待管理员决策状态并通知管理员。
 
     会话保留为 ``awaiting_admin`` 并调度管理决策超时；管理员可通过
-    ``/kick`` / ``/keep`` 决策，超时则由 :func:`handle_admin_decision_timeout`
+    ``/keep`` 放行决策（移出请用 lingchu-bot 的踢出命令），超时则由
+    :func:`handle_admin_decision_timeout`
     在群内通报并移出成员。
 
     """

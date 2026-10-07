@@ -83,7 +83,7 @@ class Config(BaseModel):
             （提供 ``get_group_notice_acklist``）。默认 True（启用闸门，
             未绑定公告的群不受影响）。
         fanqie_allow_group_admin_commands: 是否允许群内管理员（admin/群主）
-            使用 /keep、/kick 等命令。为 True 时，除配置的管理员外，
+            使用 /keep 等命令。为 True 时，除配置的管理员外，
             群内的管理员与群主也可执行；为 False 时仅配置的管理员可执行。
             默认 True（开启，群管理员默认可用）。
 

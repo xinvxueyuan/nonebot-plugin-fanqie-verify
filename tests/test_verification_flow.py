@@ -8,6 +8,25 @@ from typing import Any
 import pytest
 
 from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
+    notice_render as _notice_render,
+)
+
+
+def _reply_text(reply: object) -> str:
+    """把流程回复统一成可断言文本。
+
+    2026-10-07 起「验证通过」返回的是**回执卡片**（含已确认公告说明），
+    卡片本身不能直接 ``in``；这里拼出与卡片同口径的文本再断言。
+    """
+    if isinstance(reply, _notice_render.Card):
+        parts = [reply.title, *reply.lines]
+        parts.extend(row.preview for row in reply.rows if row.preview)
+        parts.extend(row.id_text for row in reply.rows if row.id_text)
+        return " ".join(part for part in parts if part)
+    return str(reply)
+
+
+from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
     admin_decision,
     flow as flow_module,
     get_session_store,
@@ -180,7 +199,7 @@ async def test_handle_submission_passes(
         image_url="https://example.com/shelf.png",
     )
 
-    assert "验证通过" in reply
+    assert "验证通过" in _reply_text(reply)
     assert get_session_store().get("123", "10001").status == "approved"  # type: ignore[union-attr]
     welcomes = [c for c in bot.calls if c[0] == "send_group_msg"]
     assert any("欢迎新人进群" in str(c[1]["message"]) for c in welcomes)
@@ -214,7 +233,7 @@ async def test_vision_review_vetoes(monkeypatch: pytest.MonkeyPatch) -> None:
         bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
     )
 
-    assert "验证未通过" in reply
+    assert "验证未通过" in _reply_text(reply)
 
 
 @pytest.mark.asyncio
@@ -243,7 +262,7 @@ async def test_vision_review_approves(monkeypatch: pytest.MonkeyPatch) -> None:
         bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
     )
 
-    assert "验证通过" in reply
+    assert "验证通过" in _reply_text(reply)
 
 
 @pytest.mark.asyncio
@@ -279,10 +298,161 @@ async def test_ocr_disabled_skips_ocr_and_uses_vision(
     )
 
     assert recognize_calls == []  # OCR 完全未被调用
-    assert "验证通过" in reply
+    assert "验证通过" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None
     assert record.status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_notice_gate_runs_on_vision_only_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**回归**：仅视觉模式（生产配置）下公告闸门必须生效，且**先查公告再验图**。
+
+    2026-10-07 的 bug：闸门原先只写在 OCR 路径的 ``_decide_reject_reason`` 里，
+    而生产 ``FANQIE_OCR_ENABLED=false`` 走的是视觉路径 —— 闸门**从未执行**，
+    成员未确认公告也能通过。
+    """
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import notices
+
+    vision_calls: list[str] = []
+
+    async def fake_vision(image_url: str, group_id: int) -> Any:
+        vision_calls.append(image_url)
+        _ = group_id
+        return flow_module.vision.VisionVerdict(passed=True, reason=None)
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(
+        flow_module.vision, "vision_fallback", AsyncMock(side_effect=fake_vision)
+    )
+    monkeypatch.setattr(notices, "set_path_override", notices.set_path_override)
+
+    bot: Any = FakeBot()
+    # 本群绑定一条公告，且该成员**未**确认阅读
+    monkeypatch.setattr(
+        notices,
+        "load_bindings",
+        AsyncMock(return_value={123: ("N1",)}),
+    )
+    monkeypatch.setattr(
+        notices,
+        "check_notice_read",
+        AsyncMock(
+            return_value=notices.NoticeGate(
+                blocked=True,
+                reason="未确认阅读群公告",
+                detail={"unread": ["N1"], "read": [], "bound": ["N1"]},
+            )
+        ),
+    )
+
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    text = _reply_text(reply)
+    assert "未确认阅读群公告" in text
+    assert "N1" in text
+    # 关键：**没有**调用视觉模型（先查公告、再验图）
+    assert vision_calls == []
+
+
+@pytest.mark.asyncio
+async def test_pass_receipt_reports_confirmed_notices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证通过的回执必须**说明公告确认情况**（用户 2026-10-07 指出缺失）。"""
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import notices
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(
+        flow_module.vision,
+        "vision_fallback",
+        AsyncMock(
+            return_value=flow_module.vision.VisionVerdict(passed=True, reason=None)
+        ),
+    )
+    monkeypatch.setattr(
+        notices, "load_bindings", AsyncMock(return_value={123: ("N1", "N2")})
+    )
+    monkeypatch.setattr(
+        notices,
+        "check_notice_read",
+        AsyncMock(
+            return_value=notices.NoticeGate(
+                blocked=False,
+                detail={"read": ["N1", "N2"], "bound": ["N1", "N2"]},
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        notices,
+        "fetch_group_notices",
+        AsyncMock(
+            return_value=[
+                notices.parse_notice({
+                    "notice_id": "N1",
+                    "message": {"text": "群规一"},
+                }),
+                notices.parse_notice({
+                    "notice_id": "N2",
+                    "message": {"text": "群规二"},
+                }),
+            ]
+        ),
+    )
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    assert isinstance(reply, _notice_render.Card)
+    text = _reply_text(reply)
+    assert "验证通过" in text
+    # 卡片里要能看到「已确认阅读公告 1、2（本群共要求 2 条）」
+    assert "已确认阅读公告" in text
+    assert "1、2" in text
+    assert "群规一" in text
+
+
+@pytest.mark.asyncio
+async def test_pass_receipt_mentions_no_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """没绑定公告时回执要说明「未设置」，而不是装作已校验。"""
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import notices
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(
+        flow_module.vision,
+        "vision_fallback",
+        AsyncMock(
+            return_value=flow_module.vision.VisionVerdict(passed=True, reason=None)
+        ),
+    )
+    monkeypatch.setattr(notices, "load_bindings", AsyncMock(return_value={}))
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    assert "本群未设置验证公告" in _reply_text(reply)
 
 
 @pytest.mark.asyncio
@@ -306,7 +476,7 @@ async def test_ocr_disabled_vision_unavailable_counts_retry(
         bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
     )
 
-    assert "识别失败" in reply
+    assert "识别失败" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None
     assert record.retry_count == 1
@@ -334,7 +504,7 @@ async def test_handle_submission_insufficient_retries(
         image_url="https://example.com/blank.png",
     )
 
-    assert "剩余尝试次数" in reply
+    assert "剩余尝试次数" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None
     assert record.retry_count == 1
@@ -365,7 +535,7 @@ async def test_handle_submission_other_review_retries(
         image_url="https://example.com/other.png",
     )
 
-    assert "剩余尝试次数" in reply
+    assert "剩余尝试次数" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None
     assert record.retry_count == 1
@@ -423,9 +593,9 @@ async def test_handle_submission_reject_notifies_admin(
         image_url="https://example.com/bad.png",
     )
 
-    assert "验证未通过" in reply
+    assert "验证未通过" in _reply_text(reply)
     # 回归修复：首次未通过不再直接转管理员，而是计入重试并停留在 waiting
-    assert "剩余尝试次数" in reply
+    assert "剩余尝试次数" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None
     assert record.status == "waiting"
@@ -484,7 +654,7 @@ async def test_handle_submission_policy_rejects_missing_element(
         image_url="https://example.com/shelf.png",
     )
 
-    assert "验证未通过" in reply
+    assert "验证未通过" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None
     assert record.status == "waiting"
@@ -539,7 +709,7 @@ async def test_handle_submission_policy_rejects_author(
         image_url="https://example.com/shelf.png",
     )
 
-    assert "验证未通过" in reply
+    assert "验证未通过" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None
     assert record.status == "waiting"
@@ -671,13 +841,17 @@ async def test_handle_timeout_bot_missing_expires(
 
 @pytest.mark.asyncio
 async def test_admin_kick_decision() -> None:
-    """管理员 /kick 应踢出并结束会话。"""
+    """服务层移出决策：``admin_decision(keep=False)`` 应踢出并结束会话。
+
+    注意：``/kick`` 命令已于 2026-10-07 移除（移出改用 lingchu-bot 的踢出命令），
+    但**超时自动移出**仍走这条服务路径，所以此处必须继续有覆盖。
+    """
     bot: Any = FakeBot()
     await start_verification(bot, group_id=123, user_id=10001)
 
     reply = await admin_decision(bot, group_id=123, user_id=10001, keep=False)
 
-    assert "已将该成员移出群聊" in reply
+    assert "已将该成员移出群聊" in _reply_text(reply)
     kicks = [c for c in bot.calls if c[0] == "set_group_kick"]
     assert len(kicks) == 1
     assert get_session_store().get("123", "10001").status == "kicked"  # type: ignore[union-attr]
@@ -693,7 +867,7 @@ async def test_admin_keep_decision() -> None:
 
     reply = await admin_decision(bot, group_id=123, user_id=10001, keep=True)
 
-    assert "直接批准" in reply
+    assert "直接批准" in _reply_text(reply)
     assert store.get("123", "10001").status == "approved"  # type: ignore[union-attr]
 
 
@@ -702,7 +876,7 @@ async def test_admin_keep_requires_active_verification() -> None:
     """不在验证流程中的成员不应被 /keep 误批准。"""
     bot: Any = FakeBot()
     reply = await admin_decision(bot, group_id=123, user_id=10001, keep=True)
-    assert "不在验证流程" in reply
+    assert "不在验证流程" in _reply_text(reply)
     # 未结束任何会话、未发欢迎
     assert get_session_store().get("123", "10001") is None
     welcomes = [c for c in bot.calls if c[0] == "send_group_msg"]
@@ -719,7 +893,7 @@ async def test_admin_approve_direct_approves_awaiting_admin() -> None:
 
     reply = await admin_decision(bot, group_id=123, user_id=10001, keep=True)
 
-    assert "直接批准" in reply
+    assert "直接批准" in _reply_text(reply)
     assert store.get("123", "10001").status == "approved"  # type: ignore[union-attr]
     welcomes = [c for c in bot.calls if c[0] == "send_group_msg"]
     assert any("欢迎" in str(c[1]["message"]) for c in welcomes)
@@ -790,7 +964,7 @@ async def test_handle_submission_member_already_left(
         image_url="https://example.com/shelf.png",
     )
 
-    assert "不在群聊" in reply
+    assert "不在群聊" in _reply_text(reply)
     assert get_session_store().get("123", "10001") is None
 
 
@@ -1077,7 +1251,7 @@ async def test_review_self_without_session_rejected() -> None:
     reply = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=False
     )
-    assert "没有待处理" in reply
+    assert "没有待处理" in _reply_text(reply)
     assert get_session_store().get("123", "10001") is None
 
 
@@ -1092,7 +1266,7 @@ async def test_review_self_restarts_flow_and_consumes_quota() -> None:
     reply = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=False
     )
-    assert "重新发起验证" in reply
+    assert "重新发起验证" in _reply_text(reply)
     record = store.get("123", "10001")
     assert record is not None
     assert record.retry_count == 0  # 重审重置 OCR 重试
@@ -1120,7 +1294,7 @@ async def test_review_self_limited_by_max_times(
     reply = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=False
     )
-    assert "上限" in reply
+    assert "上限" in _reply_text(reply)
     record = store.get("123", "10001")
     assert record is not None and record.review_count == 2
 
@@ -1132,7 +1306,7 @@ async def test_review_admin_unlimited_and_opens_flow() -> None:
     reply = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=True
     )
-    assert "重新发起验证" in reply
+    assert "重新发起验证" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None and record.status == "waiting"
     assert record.review_count == 0  # 管理员重审不计次
@@ -1145,7 +1319,7 @@ async def test_review_rejects_admin_target() -> None:
     reply = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=True
     )
-    assert "管理" in reply
+    assert "管理" in _reply_text(reply)
 
 
 @pytest.mark.asyncio
@@ -1155,7 +1329,7 @@ async def test_review_rejects_missing_member() -> None:
     reply = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=True
     )
-    assert "不在群" in reply
+    assert "不在群" in _reply_text(reply)
 
 
 @pytest.mark.asyncio
@@ -1376,7 +1550,7 @@ async def test_private_submission_single_group(
     reply = await handle_private_submission(
         bot, user_id=10001, image_url="https://example.com/p.png"
     )
-    assert "验证通过" in reply
+    assert "验证通过" in _reply_text(reply)
     record = get_session_store().get("123", "10001")
     assert record is not None and record.status == "approved"
 
@@ -1401,7 +1575,7 @@ async def test_private_submission_no_waiting(
     reply = await handle_private_submission(
         bot, user_id=10001, image_url="https://example.com/p.png"
     )
-    assert "没有待验证" in reply
+    assert "没有待验证" in _reply_text(reply)
 
 
 @pytest.mark.asyncio
@@ -1443,8 +1617,8 @@ async def test_private_submission_multi_group_asks_selection(
         user_id=10001,
         image_url="https://example.com/p.png",
     )
-    assert "2 个群等待验证" in reply
-    assert "123" in reply and "456" in reply
+    assert "2 个群等待验证" in _reply_text(reply)
+    assert "123" in _reply_text(reply) and "456" in reply
 
 
 @pytest.mark.asyncio
@@ -1487,7 +1661,7 @@ async def test_private_submission_multi_group_with_target(
         user_id=10001,
         image_url="https://example.com/p.png",
     )
-    assert "验证通过" in reply
+    assert "验证通过" in _reply_text(reply)
     assert store.get("123", "10001").status == "waiting"  # type: ignore[union-attr]
     assert store.get("456", "10001").status == "approved"  # type: ignore[union-attr]
 

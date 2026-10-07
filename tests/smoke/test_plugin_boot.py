@@ -41,7 +41,6 @@ def test_verification_matchers_registered() -> None:
         cmd_module.group_ban,
         cmd_module.group_admin_change,
         cmd_module.image_submission,
-        cmd_module.kick_cmd,
         cmd_module.keep_cmd,
         cmd_module.reload_config_cmd,
     ):

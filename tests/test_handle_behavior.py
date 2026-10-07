@@ -539,81 +539,6 @@ def _image_message_event() -> Any:
 
 
 @pytest.mark.asyncio
-async def test_kick_cmd_superuser_runs(
-    app: App,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """超级用户执行 /kick 应能走通命令流程（不触发依赖注入错误）。"""
-    from nonebot.adapters.onebot.v11 import (
-        Bot as OneBot11Bot,
-        GroupMessageEvent,
-        Message,
-        MessageSegment,
-    )
-
-    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
-        actions,
-        get_session_store,
-    )
-
-    async def fake_get_member_info(
-        bot: Any,
-        group_id: int,
-        user_id: int,
-    ) -> Any:
-        _ = (bot, group_id, user_id)
-        return actions.MemberInfo(
-            user_id=user_id,
-            role="member",
-            card="",
-            nickname="某用户",
-            shut_up_timestamp=0,
-        )
-
-    monkeypatch.setattr(actions, "get_member_info", fake_get_member_info)
-
-    store = get_session_store()
-    store.start(
-        group_id=str(_GROUP_ID),
-        user_id=str(_USER_ID),
-        bot_id=str(_SELF_ID),
-        platform_id="qq",
-        adapter_id="~onebot.v11",
-        protocol_id="default",
-    )
-
-    async with app.test_matcher(cmd_module.kick_cmd) as ctx:
-        bot = ctx.create_bot(base=OneBot11Bot)
-        event = GroupMessageEvent(
-            time=int(time.time()),
-            self_id=_SELF_ID,
-            post_type="message",
-            message_type="group",
-            sub_type="normal",
-            message_id=1,
-            group_id=_GROUP_ID,
-            user_id=1330509996,
-            anonymous=None,
-            sender={"user_id": 1330509996, "nickname": "owner", "role": "owner"},
-            raw_message="/kick 10001",
-            message=Message([MessageSegment.text("/kick 10001")]),
-            font=0,
-        )  # type: ignore[call-arg]
-        ctx.should_call_api(
-            "set_group_kick",
-            {"group_id": _GROUP_ID, "user_id": _USER_ID},
-        )
-        ctx.should_call_api(
-            "send_group_msg",
-            {
-                "group_id": _GROUP_ID,
-                "message": MessageSegment.reply(1) + "已将该成员移出群聊。",
-            },
-        )
-        ctx.receive_event(bot, event)
-
-
-@pytest.mark.asyncio
 async def test_pending_list_cmd_lists_awaiting_admin(app: App) -> None:
     """待处理列表命令应列出本群等待管理员决策的成员。"""
     from nonebot.adapters.onebot.v11 import (
@@ -670,8 +595,8 @@ async def test_pending_list_cmd_lists_awaiting_admin(app: App) -> None:
                 "group_id": _GROUP_ID,
                 "message": (
                     MessageSegment.reply(1) + "等待管理员决策的成员 2 人：\n"
-                    "QQ 10001（剩余 16 小时 0 分，/keep 或 /kick）\n"
-                    "QQ 20001（剩余 16 小时 0 分，/keep 或 /kick）"
+                    "QQ 10001（剩余 16 小时 0 分，/keep 放行）\n"
+                    "QQ 20001（剩余 16 小时 0 分，/keep 放行）"
                 ),
             },
         )
@@ -774,7 +699,7 @@ async def test_processing_list_cmd_lists_waiting(app: App) -> None:
                 "group_id": _GROUP_ID,
                 "message": (
                     MessageSegment.reply(1)
-                    + "等待提交截图的成员 1 人：\nQQ 10001（剩余 10 分，/keep 或 /kick）"
+                    + "等待提交截图的成员 1 人：\nQQ 10001（剩余 10 分，/keep 放行）"
                 ),
             },
         )

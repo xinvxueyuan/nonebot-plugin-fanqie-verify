@@ -110,15 +110,13 @@ verify_cmd = on_command(
 # FR9：管理员决策命令。
 # 注意：zhenxun 全局 COMMAND_START=[""]（裸词匹配），NoneBot2 的 on_command
 # 无 command_start 参数（透传给 on() 会 TypeError）。为使通知文案里的
-# "/kick /keep"（带斜杠）与裸词写法都能命中，把带 "/" 的写法加入 aliases：
+# "/keep"（带斜杠）与裸词写法都能命中，把带 "/" 的写法加入 aliases：
 # COMMAND_START=[""] 下，命令名 "/keep" 恰好匹配消息 "/keep ..."。
-kick_cmd = on_command(
-    "kick",
-    aliases={"踢出", "踢", "/kick"},
-    permission=SUPERUSER,
-    priority=5,
-    block=True,
-)
+#
+# ⚠️ 2026-10-07 用户拍板：**移除 ``/kick`` 命令**（只保留 ``/keep`` 放行）。
+# 移出成员改由 lingchu-bot 的群管命令完成，本插件的
+# :func:`...services.verification.admin_decision` 仍供**超时自动移出**路径使用，
+# 只是不再暴露成命令。
 keep_cmd = on_command(
     "keep",
     aliases={"保留", "留", "/keep"},
@@ -224,7 +222,6 @@ __all__ = [
     "group_increase",
     "image_submission",
     "keep_cmd",
-    "kick_cmd",
     "pending_list_cmd",
     "private_image_submission",
     "processing_cmd",

@@ -409,7 +409,7 @@ async def notify_admins(
     """按 ``fanqie_notify_channel`` 向配置的管理员发送通知。
 
     通知附加上对应群的作者白名单（来自放行策略的群节点），并提示管理
-    员在群内执行 /kick 或 /keep 决策。
+    员在群内执行 /keep 放行（移出请用 lingchu-bot 的踢出命令）。
 
     Args:
         bot: OneBot11 Bot 实例。
@@ -449,7 +449,8 @@ def _decorate_notice(message: str, group_id: int, user_id: int) -> str:
     return (
         f"{message}\n"
         f"该群允许作者：{allowed}\n"
-        f"请在群内执行：/kick {user_id} 或 /keep {user_id}。\n"
+        f"请在群内执行 /keep {user_id} 放行"
+        "（移出请用群管命令：lingchu-bot 的「踢出」）。\n"
         f"若 {hours} 小时内未处理，将自动在群内通报并移出该成员。"
     )
 

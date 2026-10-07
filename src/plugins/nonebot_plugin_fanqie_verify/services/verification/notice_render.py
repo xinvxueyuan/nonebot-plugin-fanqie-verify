@@ -33,6 +33,25 @@ logger = logging.getLogger("nonebot_plugin_fanqie_verify")
 CARD_WIDTH: Final[int] = 620
 MAX_WIDTH: Final[int] = 700
 
+#: 渲染放大倍率。
+#:
+#: ⚠️ 2026-10-07 实测（别再走弯路）：**htmlkit 的 ``dpi`` 在本版本里对输出像素零影响**
+#: （96 / 144 / 192 / 288 都产出同样尺寸），``max_width`` 只是**上限**不是缩放器；
+#: 输出宽度 = 内容自然宽度。所以「图太小」只能靠**放大内容本身**解决 ——
+#: 本常量把卡片宽度与全部字号同乘一个倍率。
+#: 实测：倍率 1.0 → 700x230；字号 2x → 702x469；CARD_WIDTH 1240 + 2x → 1322x353。
+SCALE: Final[float] = 1.6
+
+
+def _px(value: float) -> str:
+    """按 :data:`SCALE` 放大像素值（返回 CSS 字符串）。"""
+    return f"{round(value * SCALE)}px"
+
+
+#: 卡片宽度按倍率放大后参与渲染（``MAX_WIDTH`` 必须同步放大，否则被压回原尺寸）。
+RENDER_CARD_WIDTH: Final[int] = round(CARD_WIDTH * SCALE)
+RENDER_MAX_WIDTH: Final[int] = round(MAX_WIDTH * SCALE)
+
 #: 一张图最多画多少行（超出只提示条数 —— 否则公告多了能生成几十米长的图）。
 MAX_ROWS: Final[int] = 40
 
@@ -47,35 +66,42 @@ TONE_COLORS: Final[dict[str, str]] = {
 _CSS: Final[str] = f"""
   * {{ box-sizing: border-box; }}
   body {{
-    margin: 0; padding: 16px; background: #f1f5f9;
+    margin: 0; padding: {_px(16)}; background: #f1f5f9;
     font-family: "WenQuanYi Zen Hei", "Noto Sans CJK SC", "Microsoft YaHei",
                  "PingFang SC", sans-serif;
   }}
   .card {{
-    width: {CARD_WIDTH}px; background: #ffffff; border-radius: 12px;
-    padding: 22px 24px; border: 1px solid #e2e8f0;
+    width: {_px(CARD_WIDTH)}; background: #ffffff; border-radius: {_px(12)};
+    padding: {_px(22)} {_px(24)}; border: 1px solid #e2e8f0;
   }}
   .title {{
-    font-size: 26px; font-weight: bold; color: #0f172a;
-    padding-left: 12px; border-left: 6px solid __COLOR__; margin-bottom: 16px;
+    font-size: {_px(26)}; font-weight: bold; color: #0f172a;
+    padding-left: {_px(12)}; border-left: {_px(6)} solid __COLOR__;
+    margin-bottom: {_px(16)};
   }}
-  .line {{ font-size: 20px; color: #334155; line-height: 30px; margin-bottom: 6px; }}
-  .row {{ margin-bottom: 14px; }}
+  .line {{
+    font-size: {_px(20)}; color: #334155; line-height: {_px(30)};
+    margin-bottom: {_px(6)};
+  }}
+  .row {{ margin-bottom: {_px(14)}; }}
   .id {{
-    font-size: 20px; color: #0f172a; font-family: monospace;
+    font-size: {_px(20)}; color: #0f172a; font-family: monospace;
     word-wrap: break-word;
   }}
   .badge {{
-    display: inline-block; font-size: 17px; color: #1d4ed8;
-    background: #eff6ff; border-radius: 6px; padding: 2px 10px;
-    margin-left: 10px;
+    display: inline-block; font-size: {_px(17)}; color: #1d4ed8;
+    background: #eff6ff; border-radius: {_px(6)}; padding: {_px(2)} {_px(10)};
+    margin-left: {_px(10)};
   }}
   .badge.warn {{ color: #b45309; background: #fef3c7; }}
-  .preview {{ font-size: 19px; color: #475569; line-height: 28px; margin-top: 4px; }}
-  .meta {{ font-size: 16px; color: #94a3b8; margin-top: 2px; }}
+  .preview {{
+    font-size: {_px(19)}; color: #475569; line-height: {_px(28)};
+    margin-top: {_px(4)};
+  }}
+  .meta {{ font-size: {_px(16)}; color: #94a3b8; margin-top: {_px(2)}; }}
   .footer {{
-    margin-top: 16px; padding-top: 12px; border-top: 1px dashed #cbd5e1;
-    font-size: 17px; color: #64748b; line-height: 26px;
+    margin-top: {_px(16)}; padding-top: {_px(12)}; border-top: 1px dashed #cbd5e1;
+    font-size: {_px(17)}; color: #64748b; line-height: {_px(26)};
   }}
 """
 
@@ -183,7 +209,7 @@ async def render_card(card: Card) -> bytes | None:
     """渲染成 PNG。**任何失败都只 warning 并返回 None**（调用方回退纯文本）。"""
     try:
         html_to_pic = _load_htmlkit()
-        return await html_to_pic(build_html(card), max_width=MAX_WIDTH)
+        return await html_to_pic(build_html(card), max_width=RENDER_MAX_WIDTH)
     except Exception as exc:  # noqa: BLE001 - 渲染失败必须回退文本，绝不冒泡
         logger.warning("公告命令渲染失败，回退纯文本: %s: %s", type(exc).__name__, exc)
         return None
@@ -193,6 +219,9 @@ __all__ = [
     "CARD_WIDTH",
     "MAX_ROWS",
     "MAX_WIDTH",
+    "RENDER_CARD_WIDTH",
+    "RENDER_MAX_WIDTH",
+    "SCALE",
     "TONE_COLORS",
     "Card",
     "Row",

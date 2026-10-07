@@ -41,6 +41,8 @@ from typing import TYPE_CHECKING, Any
 from nonebot import logger
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from nonebot.adapters.onebot.v11 import Bot
 
 #: localstore 配置目录下的文件名。
@@ -369,6 +371,88 @@ async def check_notice_read(bot: Bot, group_id: int, user_id: int) -> NoticeGate
     return NoticeGate(blocked=False, detail={"read": read, "bound": list(notice_ids)})
 
 
+@dataclass(frozen=True, slots=True)
+class ConfirmedNotice:
+    """一条**已确认阅读**的公告（用于验证通过回执）。"""
+
+    notice_id: str
+    #: 与「获取群公告列表」一致的展示序号；拿不到公告列表时为空串。
+    label: str = ""
+    preview: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class NoticeSummary:
+    """闸门结果的对外摘要 —— 让「公告有没有被确认」这件事**看得见**。
+
+    2026-10-07 用户指出：验证通过的回执里完全没提公告，成员与管理员都无从判断
+    「未确认阅读公告就不能通过」这条规则到底生效没有。
+    """
+
+    bound: int = 0
+    confirmed: tuple[ConfirmedNotice, ...] = ()
+    #: 降级原因：``disabled`` / ``no_binding`` / ``api_error``；None 表示本次真的校了。
+    skipped: str | None = None
+
+    @property
+    def enforced(self) -> bool:
+        """本次验证是否**真的**执行了公告校验（非降级且有绑定）。"""
+        return self.skipped is None and self.bound > 0
+
+    def describe(self) -> str:
+        """一行说明，卡片与纯文本回退共用（保证两种媒介口径一致）。"""
+        if self.skipped == "disabled":
+            return "本群公告检查已关闭（无需确认公告）。"
+        if self.skipped == "no_binding":
+            return "本群未设置验证公告（无需确认公告）。"
+        if self.skipped == "api_error":
+            return "公告接口暂不可用，本次未校验公告阅读情况。"
+        if not self.enforced:
+            return "本群未设置验证公告（无需确认公告）。"
+        labels = [item.label for item in self.confirmed if item.label]
+        if labels:
+            return f"已确认阅读公告 {'、'.join(labels)}（本群共要求 {self.bound} 条）。"
+        return f"已确认阅读公告 {len(self.confirmed)}/{self.bound} 条。"
+
+
+async def build_notice_summary(bot: Bot, group_id: int, user_id: int) -> NoticeSummary:
+    """复查闸门并把结果整理成 :class:`NoticeSummary`（供通过回执与事件明细）。
+
+    序号取自**与「获取群公告列表」同一套顺序**，所以卡片上的编号与管理员当时看到的一致；
+    公告列表取不到时退化为「只报条数」，不猜序号。
+
+    Args:
+        bot: 当前 Bot 实例。
+        group_id: 群号。
+        user_id: 成员 QQ 号。
+
+    Returns:
+        闸门摘要；任何异常都收敛为「未校验」而不是抛（回执路径不能因它失败）。
+
+    """
+    gate = await check_notice_read(bot, group_id, user_id)
+    skipped = gate.detail.get("skipped")
+    if skipped:
+        return NoticeSummary(skipped=str(skipped))
+
+    bound = tuple(str(item) for item in (gate.detail.get("bound") or ()))
+    read_ids = tuple(str(item) for item in (gate.detail.get("read") or ()))
+
+    listing = await fetch_group_notices(bot, group_id)
+    index_map = notice_index_map(listing) if listing is not None else {}
+    by_id = {notice.notice_id: notice for notice in listing or []}
+
+    confirmed = tuple(
+        ConfirmedNotice(
+            notice_id=notice_id,
+            label=str(index_map[notice_id]) if notice_id in index_map else "",
+            preview=by_id[notice_id].preview if notice_id in by_id else "",
+        )
+        for notice_id in read_ids
+    )
+    return NoticeSummary(bound=len(bound), confirmed=confirmed)
+
+
 def is_bindable(notice: GroupNotice) -> tuple[bool, str | None]:
     """这条公告能不能拿来当验证公告。
 
@@ -382,6 +466,69 @@ def is_bindable(notice: GroupNotice) -> tuple[bool, str | None]:
     if not notice.confirm_required:
         return False, "该公告未开启「需要确认」（无已读名单可查）"
     return True, None
+
+
+def notice_index_map(notices: Sequence[GroupNotice]) -> dict[str, int]:
+    """公告 id → **显示序号**（从 1 开始，顺序即列表展示顺序）。
+
+    公告 id 是长串，在群里手抄/回填都不可靠，因此对外一律用短序号；序号**只是位置的
+    别名**，绑定仍存真实 ``notice_id``（顺序变化不会污染已存数据）。
+
+    Args:
+        notices: 该群当前公告列表（顺序即展示顺序）。
+
+    Returns:
+        ``{notice_id: 序号}``。
+
+    """
+    return {notice.notice_id: index for index, notice in enumerate(notices, start=1)}
+
+
+def resolve_notice_tokens(
+    notices: Sequence[GroupNotice], tokens: Sequence[str]
+) -> tuple[list[str], list[str]]:
+    """把「序号 或 公告 id」的混合输入解析成真实 ``notice_id``。
+
+    规则（用户 2026-10-07 拍板）：token 是纯数字**且落在 ``1..len(notices)``** 时按
+    **序号**取；否则**原样透传**（当作公告 id）。
+
+    透传这一条是刻意的逃生通道：已从群里删除的公告不在当前列表中，序号自然算不出来，
+    但它的 id 仍必须能用于**单独解绑**（纯序号方案做不到，只能「全部」清空）。
+
+    Args:
+        notices: 该群当前公告列表（顺序即「获取群公告列表」里的展示顺序）。
+        tokens: 用户输入（可混用序号与 id）。
+
+    Returns:
+        ``(按序号解析出的 notice_id 列表（去重保序）, 其余原样透传的 token 列表)``。
+
+    """
+    resolved: list[str] = []
+    passthrough: list[str] = []
+    for raw in tokens:
+        token = raw.strip()
+        if not token:
+            continue
+        index = _as_list_index(token, len(notices))
+        if index is not None:
+            notice_id = notices[index - 1].notice_id
+            if notice_id not in resolved:
+                resolved.append(notice_id)
+            continue
+        if token not in passthrough:
+            passthrough.append(token)
+    return resolved, passthrough
+
+
+def _as_list_index(token: str, count: int) -> int | None:
+    """Token 若可作**列表序号**则返回序号（1 起），否则返回 None。"""
+    if not token.isdigit():
+        return None
+    try:
+        value = int(token)
+    except ValueError:  # pragma: no cover - isdigit 已挡住
+        return None
+    return value if 1 <= value <= count else None
 
 
 def resolve_bindable(
@@ -418,17 +565,22 @@ __all__ = [
     "MAX_LISTED_NOTICES",
     "NOTICES_FILENAME",
     "PREVIEW_LEN",
+    "ConfirmedNotice",
     "GroupNotice",
     "NoticeGate",
+    "NoticeSummary",
     "acklist_user_ids",
     "bind_notices",
+    "build_notice_summary",
     "check_notice_read",
     "fetch_acklist",
     "fetch_group_notices",
     "is_bindable",
     "load_bindings",
+    "notice_index_map",
     "parse_notice",
     "resolve_bindable",
+    "resolve_notice_tokens",
     "save_bindings",
     "set_path_override",
     "unbind_notices",
