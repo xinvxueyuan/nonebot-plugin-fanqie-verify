@@ -21,6 +21,19 @@ _PUBLISH_TIME = 1_700_000_000
 _SENDER_ID = 10001
 
 
+def _notice(notice_id: str, text: str = "公告正文") -> notices.GroupNotice:
+    """构造一条**确定解析成功**的公告。
+
+    ``parse_notice`` 返回 ``GroupNotice | None``（无效返回 None），直接把结果塞进
+    列表会让类型是 ``list[GroupNotice | None]``，传给 ``notice_index_map`` /
+    ``resolve_notice_tokens`` 时 pyright 报错。这里断言掉 None，既让类型收敛，
+    也顺带验证了这几条假数据本身是合法公告。
+    """
+    parsed = notices.parse_notice({"notice_id": notice_id, "message": {"text": text}})
+    assert parsed is not None
+    return parsed
+
+
 class FakeBot:
     """记录调用的假 Bot；按动作名返回预设结果或抛异常。"""
 
@@ -79,20 +92,13 @@ def _raw_notice(
 
 def test_notice_index_map_is_one_based_in_list_order() -> None:
     """序号从 1 开始，且顺序与「获取群公告列表」一致。"""
-    listing = [
-        notices.parse_notice({"notice_id": "A"}),
-        notices.parse_notice({"notice_id": "B"}),
-        notices.parse_notice({"notice_id": "C"}),
-    ]
+    listing = [_notice("A"), _notice("B"), _notice("C")]
 
     assert notices.notice_index_map(listing) == {"A": 1, "B": 2, "C": 3}
 
 
 def test_resolve_tokens_accepts_in_range_index() -> None:
-    listing = [
-        notices.parse_notice({"notice_id": "A"}),
-        notices.parse_notice({"notice_id": "B"}),
-    ]
+    listing = [_notice("A"), _notice("B")]
 
     resolved, passthrough = notices.resolve_notice_tokens(listing, ["2"])
 
@@ -102,7 +108,7 @@ def test_resolve_tokens_accepts_in_range_index() -> None:
 
 def test_resolve_tokens_out_of_range_is_passed_through() -> None:
     """超出范围的数字按**原样透传**（保住「已删除公告仍能单独解绑」的通道）。"""
-    listing = [notices.parse_notice({"notice_id": "A"})]
+    listing = [_notice("A")]
 
     resolved, passthrough = notices.resolve_notice_tokens(listing, ["9"])
 
@@ -112,7 +118,7 @@ def test_resolve_tokens_out_of_range_is_passed_through() -> None:
 
 def test_resolve_tokens_passes_through_deleted_notice_id() -> None:
     """**关键**：已删除公告（不在当前列表）的 id 必须原样透传，否则没法单独解绑。"""
-    listing = [notices.parse_notice({"notice_id": "A"})]
+    listing = [_notice("A")]
 
     resolved, passthrough = notices.resolve_notice_tokens(listing, ["gone-id"])
 
@@ -121,10 +127,7 @@ def test_resolve_tokens_passes_through_deleted_notice_id() -> None:
 
 
 def test_resolve_tokens_accepts_raw_id_and_mixes() -> None:
-    listing = [
-        notices.parse_notice({"notice_id": "A"}),
-        notices.parse_notice({"notice_id": "B"}),
-    ]
+    listing = [_notice("A"), _notice("B")]
 
     resolved, passthrough = notices.resolve_notice_tokens(listing, ["1", "B", "1"])
 

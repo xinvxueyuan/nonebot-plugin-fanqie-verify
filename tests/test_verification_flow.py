@@ -845,7 +845,7 @@ async def test_policy_reject_reaches_admin_after_max_attempts(
     record = store.get("123", "10001")
     assert record is not None
     assert record.status == "awaiting_admin"
-    assert "已通知管理员处理" in replies[-1]
+    assert "已通知管理员处理" in _reply_text(replies[-1])
 
 
 @pytest.mark.asyncio
@@ -1353,12 +1353,14 @@ async def test_review_self_limited_by_max_times(
     await start_verification(bot, group_id=123, user_id=10001)
     store = get_session_store()
 
-    assert "重新发起验证" in await review_verification(
+    first = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=False
     )
-    assert "重新发起验证" in await review_verification(
+    assert "重新发起验证" in _reply_text(first)
+    second = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=False
     )
+    assert "重新发起验证" in _reply_text(second)
     reply = await review_verification(
         bot, group_id=123, user_id=10001, triggered_by_admin=False
     )
@@ -1686,7 +1688,7 @@ async def test_private_submission_multi_group_asks_selection(
         image_url="https://example.com/p.png",
     )
     assert "2 个群等待验证" in _reply_text(reply)
-    assert "123" in _reply_text(reply) and "456" in reply
+    assert "123" in _reply_text(reply) and "456" in _reply_text(reply)
 
 
 @pytest.mark.asyncio
