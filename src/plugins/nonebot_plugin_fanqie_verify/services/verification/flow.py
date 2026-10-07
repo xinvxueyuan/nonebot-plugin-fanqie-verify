@@ -280,7 +280,7 @@ async def _notice_gate_block(
     user_id: int,
     record: SessionRecord,
 ) -> Reply | None:
-    """公告闸门：未确认阅读绑定公告时返回拒绝回执；放行返回 ``None``。
+    """公告闸门：未确认阅读绑定公告时返回提示回执；放行返回 ``None``。
 
     2026-10-07 前这段逻辑在 ``_decide_reject_reason`` 里（OCR 路径专属），
     生产「仅视觉」模式下**完全没被执行过**；现前移到收到图片之前，两条路径共用。
@@ -303,29 +303,45 @@ async def _notice_gate_block(
         gate.detail,
         record.trace_id,
     )
-    return await _handle_reject(
-        bot,
-        group_id,
-        user_id,
-        _blank_evidence(),
-        _notice_gate_reason(gate),
+    return await _notice_block_reply(bot, group_id, gate)
+
+
+async def _notice_block_reply(
+    bot: Bot, group_id: int, gate: notices.NoticeGate
+) -> Reply:
+    """未确认公告的提示 —— **不消耗重试次数**（用户 2026-10-07 拍板）。
+
+    与 :func:`_handle_reject` 的关键区别：**不调 ``store.mark_retry()``**，也不升级到
+    管理员决策。没看公告属于「还没开始验」，不该拿书评的重试机会去抵。
+
+    序号取自与「获取群公告列表」同一套顺序；拿不到列表时退化为显示公告 id。
+    """
+    unread = [str(item) for item in (gate.detail.get("unread") or ())]
+    listing = await notices.fetch_group_notices(bot, group_id)
+    index_map = notices.notice_index_map(listing) if listing is not None else {}
+    by_id = {notice.notice_id: notice for notice in (listing or [])}
+    rows = []
+    for notice_id in unread:
+        label = index_map.get(notice_id)
+        rows.append(
+            notice_render.Row(
+                id_text=f"公告 {label}" if label else f"公告 {notice_id}",
+                badge="未确认",
+                badge_warn=True,
+                preview=by_id[notice_id].preview if notice_id in by_id else "",
+            )
+        )
+    return notice_render.Card(
+        title="请先确认阅读群公告",
+        lines=[
+            "本群要求先确认阅读群公告，才能通过书评验证。",
+            "在群公告里打开上面这些公告并点「确认」，再重新发送书评截图即可。",
+            "**本次不消耗验证次数**，确认后随时可以再来。",
+        ],
+        rows=rows,
+        tone="warn",
+        footer="确认阅读后重新发送截图即可继续验证。",
     )
-
-
-def _blank_evidence() -> ReadingEvidence:
-    """闸门拦截时用的空证据（此时**还没验图**，不该伪造任何提取结果）。"""
-    from .models import ReadingEvidence as _Evidence
-
-    return _Evidence()
-
-
-def _notice_gate_reason(gate: notices.NoticeGate) -> str:
-    """公告闸门的拒绝原因（带上未读的公告 id，方便管理员对照）。"""
-    unread = gate.detail.get("unread") or []
-    reason = gate.reason or "未确认阅读群公告"
-    if unread:
-        return f"{reason}：{'、'.join(str(item) for item in unread)}"
-    return reason
 
 
 async def _handle_vision_fallback(

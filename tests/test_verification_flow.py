@@ -22,6 +22,7 @@ def _reply_text(reply: object) -> str:
         parts = [reply.title, *reply.lines]
         parts.extend(row.preview for row in reply.rows if row.preview)
         parts.extend(row.id_text for row in reply.rows if row.id_text)
+        parts.extend(row.badge for row in reply.rows if row.badge)
         return " ".join(part for part in parts if part)
     return str(reply)
 
@@ -357,10 +358,77 @@ async def test_notice_gate_runs_on_vision_only_path(
     )
 
     text = _reply_text(reply)
-    assert "未确认阅读群公告" in text
-    assert "N1" in text
-    # 关键：**没有**调用视觉模型（先查公告、再验图）
+    assert "请先确认阅读群公告" in text
+    assert "不消耗验证次数" in text
+    assert "N1" in text  # 拿不到公告列表时显示 id，成员仍知道该确认哪条
+    # 关键 1：**没有**调用视觉模型（先查公告、再验图）
     assert vision_calls == []
+    # 关键 2：**不消耗重试次数**，会话仍在等待（用户 2026-10-07 拍板）
+    record = get_session_store().get("123", "10001")
+    assert record is not None
+    assert record.status == "waiting"
+    assert record.retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_notice_gate_block_shows_index_when_listing_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """能拿到公告列表时，拦截图里用**序号**指路（与列表命令同一套顺序）。"""
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import notices
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(
+        flow_module.vision,
+        "vision_fallback",
+        AsyncMock(
+            return_value=flow_module.vision.VisionVerdict(passed=True, reason=None)
+        ),
+    )
+    monkeypatch.setattr(
+        notices, "load_bindings", AsyncMock(return_value={123: ("N1", "N2")})
+    )
+    monkeypatch.setattr(
+        notices,
+        "check_notice_read",
+        AsyncMock(
+            return_value=notices.NoticeGate(
+                blocked=True,
+                reason="未确认阅读群公告",
+                detail={"unread": ["N2"], "read": ["N1"], "bound": ["N1", "N2"]},
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        notices,
+        "fetch_group_notices",
+        AsyncMock(
+            return_value=[
+                notices.parse_notice({
+                    "notice_id": "N1",
+                    "message": {"text": "群规一"},
+                }),
+                notices.parse_notice({
+                    "notice_id": "N2",
+                    "message": {"text": "群规二"},
+                }),
+            ]
+        ),
+    )
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    text = _reply_text(reply)
+    assert "公告 2" in text  # N2 是列表里的第 2 条
+    assert "群规二" in text  # 带正文预览，方便成员对上号
+    assert "未确认" in text
 
 
 @pytest.mark.asyncio
