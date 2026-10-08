@@ -370,6 +370,20 @@ async def _handle_vision_fallback(
             },
         )
         if verdict.passed:
+            # 确定性兜底：模型可能忽略提示词里的「发布者不能是作者」，
+            # 这里按群策略再查一遍（生产是仅视觉模式，这条就是实际生效点）。
+            conflict = policy.reviewer_author_reason(group_id, verdict.reader_name)
+            if conflict is not None:
+                logger.info(
+                    "视觉判定被发布者规则否决 group={} user={} reader={} trace={}",
+                    group_id,
+                    user_id,
+                    verdict.reader_name,
+                    record.trace_id,
+                )
+                return await _handle_reject(
+                    bot, group_id, user_id, fallback_evidence, conflict
+                )
             logger.info(
                 "视觉判定通过 group={} user={} trace={}",
                 group_id,
@@ -438,6 +452,19 @@ async def _vision_review(
                 user_id,
                 fallback_evidence,
                 vision_verdict.reason,
+            )
+        conflict = policy.reviewer_author_reason(group_id, vision_verdict.reader_name)
+        if conflict is not None:
+            logger.info(
+                "视觉复核按发布者规则否决 group={} user={} reader={} trace={}",
+                group_id,
+                user_id,
+                vision_verdict.reader_name,
+                record.trace_id,
+            )
+            fallback_evidence = vision.verdict_to_evidence(vision_verdict)
+            return await _handle_reject(
+                bot, group_id, user_id, fallback_evidence, conflict
             )
         logger.info(
             "视觉复核通过 group={} user={} trace={}",

@@ -264,3 +264,17 @@ class TestVisionFallback:
             ),
         ):
             assert await vision.vision_fallback("http://x/img.jpg", 123) is None
+
+
+# ---------------------------------------------------------------------------
+# 提示词必须保留「发布者不能是作者」这条（生产走仅视觉，丢了就没人拦）
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_carries_reviewer_not_author_rule() -> None:
+    """提示词里必须有第 5 条：书评发布者不能是白名单作者。"""
+    prompt = vision._build_prompt(1094538078)
+
+    assert "发布者" in prompt
+    assert "不能是上述白名单作者" in prompt
+    assert "5." in prompt

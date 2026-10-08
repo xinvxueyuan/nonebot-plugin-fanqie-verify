@@ -66,6 +66,7 @@ class PolicyCheckResult:
         passed: 是否满足放行条件。
         missing_elements: 缺失的元素名列表。
         author_allowed: 作者是否命中白名单（群未配置时为 True）。
+        reviewer_is_author: 书评**发布者**是否命中了本群作者白名单（命中即拒绝）。
         reason: 未通过时的原因；通过时为 ``None``。
 
     """
@@ -73,6 +74,7 @@ class PolicyCheckResult:
     passed: bool
     missing_elements: tuple[str, ...] = ()
     author_allowed: bool = True
+    reviewer_is_author: bool = False
     reason: str | None = None
 
 
@@ -115,6 +117,11 @@ class GroupPolicy:
     def is_configured(self) -> bool:
         """该群是否配置了作者节点。"""
         return bool(self.authors)
+
+    @property
+    def author_names_label(self) -> str:
+        """作者名列表的展示串（拒绝原因里点名是谁，便于成员/管理员对照）。"""
+        return "、".join(sorted(self.author_names))
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +207,14 @@ class VerificationPolicy:
                 reason="作者不在白名单",
             )
 
+        if self.is_reviewer_author(evidence, group):
+            return PolicyCheckResult(
+                passed=False,
+                missing_elements=(),
+                reviewer_is_author=True,
+                reason=f"书评发布者是本群作者（{group.author_names_label}）",
+            )
+
         return PolicyCheckResult(passed=True)
 
     def is_author_allowed(
@@ -223,6 +238,85 @@ class VerificationPolicy:
         if author is None:
             return False
         return author.value in group.author_names
+
+    def is_reviewer_author(
+        self,
+        evidence: ReadingEvidence,
+        group: GroupPolicy,
+    ) -> bool:
+        """**书评发布者**是否就是本群配置的作者之一。
+
+        用户 2026-10-08 要求新增的边界：截图里书评的**发布者**不能是白名单作者 ——
+        作者本人（或与作者同名）的书评不构成「读者读过」的证据。
+
+        判据与作者白名单一致：**去掉首尾空白后完全相等**（不做包含匹配，
+        避免「百舸川掮客的小号」这类误判与漏判）。
+        ``reader_name`` 缺失或为占位符（如自己发布时的「我」）时**不拦** ——
+        拿不到名字就没有可比对的对象，这里只做「能确认冲突就拦」。
+
+        Args:
+            evidence: 提取出的阅读证据。
+            group: 群策略。
+
+        Returns:
+            发布者是否命中作者白名单。
+
+        """
+        reader = getattr(evidence, "reader_name", None)
+        if reader is None:
+            return False
+        return names_conflict(reader.value, group.author_names)
+
+    @property
+    def reviewer_reject_reason(self) -> str:
+        """发布者是作者时的统一拒绝原因（视觉路径与策略路径同口径）。"""
+        return "书评发布者是本群作者"
+
+
+def names_conflict(name: str | None, author_names: frozenset[str]) -> bool:
+    """名字是否命中作者集合（去掉首尾空白后完全相等）。
+
+    抽成纯函数是为了让**两条判定路径共用同一口径**：OCR 路径走
+    :meth:`VerificationPolicy.is_reviewer_author`，仅视觉路径（生产在用）
+    走 :func:`reviewer_author_reason` —— 两处各写一遍相等逻辑迟早会漂移。
+
+    Args:
+        name: 待判定的名字（书评发布者）；``None`` 或空串返回 ``False``。
+        author_names: 作者名集合。
+
+    Returns:
+        是否命中。
+
+    """
+    if name is None:
+        return False
+    stripped = name.strip()
+    if not stripped:
+        return False
+    return stripped in author_names
+
+
+def reviewer_author_reason(group_id: int, reader_name: str | None) -> str | None:
+    """按群策略判断「书评发布者是作者」并给出拒绝原因；无冲突返回 ``None``。
+
+    给**仅视觉路径**用（那条路径直接采信模型的 ``passed``，不经过
+    ``VerificationPolicy.check``）：模型可能在提示词之外仍给出通过的结论，
+    这里做一次确定性的兜底，避免规则只存在于提示词里、无法被测试与保证。
+
+    Args:
+        group_id: 群号。
+        reader_name: 模型或 OCR 给出的书评发布者名。
+
+    Returns:
+        冲突时的拒绝原因；否则 ``None``。
+
+    """
+    group = get_policy().group_policy(group_id)
+    if group is None or not group.is_configured:
+        return None
+    if names_conflict(reader_name, group.author_names):
+        return f"书评发布者是本群作者（{group.author_names_label}）"
+    return None
 
 
 _policy_cache: VerificationPolicy | None = None
@@ -453,5 +547,7 @@ __all__ = [
     "VerificationPolicy",
     "get_policy",
     "load_policy",
+    "names_conflict",
     "reload_policy",
+    "reviewer_author_reason",
 ]

@@ -16,6 +16,7 @@ from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
     PolicyConfigError,
     ReadingEvidence,
     load_policy,
+    policy as policy_module,
     reload_policy,
 )
 from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy import (
@@ -23,6 +24,8 @@ from src.plugins.nonebot_plugin_fanqie_verify.services.verification.policy impor
     AuthorEntry,
     GroupPolicy,
     VerificationPolicy,
+    names_conflict,
+    reviewer_author_reason,
 )
 
 _GROUP = 868258211
@@ -317,3 +320,84 @@ name = "阿百川大鬼"
     )
     with pytest.raises(PolicyConfigError):
         load_policy(path)
+
+
+# ---------------------------------------------------------------------------
+# 9. 边界：书评发布者不能是配置的作者（用户 2026-10-08 要求）
+# ---------------------------------------------------------------------------
+
+
+def _evidence_with_reader(
+    author: str = "阿百川大鬼", reader: str | None = None
+) -> ReadingEvidence:
+    """构造带「书评发布者名」的证据（``reader=None`` 表示没识别出来）。"""
+    return ReadingEvidence(
+        is_self_review=True,
+        book_name=ExtractedField("综漫：吉他雇佣兵无法找到归宿？", "b", 1.0),
+        author=ExtractedField(author, "a", 1.0),
+        reader_name=ExtractedField(reader, "r", 1.0) if reader is not None else None,
+    )
+
+
+def test_names_conflict_is_exact_after_strip() -> None:
+    """判据是「去掉首尾空白后完全相等」——不做包含匹配。"""
+    authors = frozenset({"百舸川掮客", "阿百川大鬼"})
+
+    assert names_conflict("百舸川掮客", authors) is True
+    assert names_conflict("  百舸川掮客 ", authors) is True
+    assert names_conflict("百舸川掮客的小号", authors) is False  # 不做包含匹配
+    assert names_conflict("百舸川", authors) is False
+    assert names_conflict("", authors) is False
+    assert names_conflict("   ", authors) is False
+    assert names_conflict(None, authors) is False
+
+
+def test_check_rejects_when_reviewer_is_configured_author() -> None:
+    """发布者命中作者白名单 → 判不通过，原因里点名是哪位作者。"""
+    group = GroupPolicy(group_id=_GROUP, authors=(AuthorEntry(name="百舸川掮客"),))
+    policy = _policy_with_groups({_GROUP: group})
+
+    ok = _evidence_with_reader(author="百舸川掮客", reader="路过的读者")
+    assert policy.check(ok, _GROUP).passed
+
+    result = policy.check(
+        _evidence_with_reader(author="百舸川掮客", reader="百舸川掮客"), _GROUP
+    )
+    assert result.passed is False
+    assert result.reviewer_is_author is True
+    assert result.reason is not None and "百舸川掮客" in result.reason
+
+
+def test_check_allows_when_reader_name_missing() -> None:
+    """拿不到发布者名时**不拦**：没有可比对的对象，不制造假阴性。"""
+    group = GroupPolicy(group_id=_GROUP, authors=(AuthorEntry(name="百舸川掮客"),))
+    policy = _policy_with_groups({_GROUP: group})
+
+    # reader_name 不在 required_elements 里，缺失也不算缺元素
+    evidence = _evidence_with_reader(author="百舸川掮客", reader=None)
+    assert policy.check(evidence, _GROUP).passed is True
+
+
+def test_check_reviewer_rule_skipped_for_unconfigured_group() -> None:
+    """未配置作者节点的群不做该判定（与作者白名单的宽松语义一致）。"""
+    policy = _policy_with_groups({})
+
+    assert (
+        policy.check(_evidence_with_reader(reader="百舸川掮客"), _GROUP).passed is True
+    )
+
+
+def test_reviewer_author_reason_follows_group_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """仅视觉路径用的入口：按群策略给原因，无冲突/未配置群给 ``None``。"""
+    group = GroupPolicy(group_id=_GROUP, authors=(AuthorEntry(name="百舸川掮客"),))
+    policy_obj = _policy_with_groups({_GROUP: group})
+    monkeypatch.setattr(policy_module, "get_policy", lambda: policy_obj)
+
+    assert reviewer_author_reason(_GROUP, "路过的读者") is None
+    assert reviewer_author_reason(_GROUP, None) is None
+    assert reviewer_author_reason(_OTHER_GROUP, "百舸川掮客") is None  # 该群未配置
+
+    reason = reviewer_author_reason(_GROUP, "百舸川掮客")
+    assert reason is not None and "百舸川掮客" in reason

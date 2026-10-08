@@ -306,6 +306,90 @@ async def test_ocr_disabled_skips_ocr_and_uses_vision(
 
 
 @pytest.mark.asyncio
+async def test_vision_pass_vetoed_when_reviewer_is_author(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**仅视觉路径**（生产在用）：模型判通过、但书评发布者是白名单作者 → 仍要拒绝。
+
+    用户 2026-10-08 新增的边界。这条是确定性兜底 —— 提示词里虽然写了该规则，
+    但不能把「拦不拦」寄托在模型是否听话上（那条路径直接采信模型的 passed）。
+    """
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import policy
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(
+        flow_module.vision,
+        "vision_fallback",
+        AsyncMock(
+            return_value=flow_module.vision.VisionVerdict(
+                passed=True,  # ← 模型说通过
+                reason=None,
+                is_self_review=True,
+                reader_name="百舸川掮客",  # ← 但发布者是作者
+                book_name="综漫：吉他雇佣兵无法找到归宿？",
+                author="百舸川掮客",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        policy,
+        "reviewer_author_reason",
+        lambda _gid, name: (
+            "书评发布者是本群作者（百舸川掮客）" if name == "百舸川掮客" else None
+        ),
+    )
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    text = _reply_text(reply)
+    assert "发布者是本群作者" in text
+    record = get_session_store().get("123", "10001")
+    assert record is not None
+    assert record.status != "approved"  # 没被放行
+
+
+@pytest.mark.asyncio
+async def test_vision_pass_allowed_for_ordinary_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """对照组：发布者是普通读者 → 照常通过（别把规则做成一律拒绝）。"""
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import policy
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(
+        flow_module.vision,
+        "vision_fallback",
+        AsyncMock(
+            return_value=flow_module.vision.VisionVerdict(
+                passed=True,
+                reason=None,
+                is_self_review=True,
+                reader_name="路过的读者",
+            )
+        ),
+    )
+    monkeypatch.setattr(policy, "reviewer_author_reason", lambda _gid, _name: None)
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    assert "验证通过" in _reply_text(reply)
+
+
+@pytest.mark.asyncio
 async def test_notice_gate_runs_on_vision_only_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
