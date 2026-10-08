@@ -51,14 +51,19 @@ def _event(message: str, *, user_id: int = _SUPERUSER) -> Any:
 
 
 def _raw_notice(
-    notice_id: str, *, confirm: bool = True, text: str = "公告正文"
+    notice_id: str,
+    *,
+    confirm: bool = True,
+    send_new_member: bool = True,
+    text: str = "公告正文",
 ) -> dict[str, Any]:
-    """构造一条接口原始公告。"""
+    """构造一条接口原始公告（默认是「可用公告」：两者都勾）。"""
     return {
         "notice_id": notice_id,
         "message": {"text": text},
         "settings": {
             "confirm_required": confirm,
+            "send_new_member": send_new_member,
             "pinned": False,
             "is_show_edit_card": False,
         },
@@ -228,10 +233,10 @@ async def test_notice_list_reports_api_failure(
 
 
 @pytest.mark.asyncio
-async def test_notice_bind_skips_unconfirmed_and_reports(
+async def test_notice_bind_rejects_multiple_tokens(
     app: App, sent: list[dict[str, Any]]
 ) -> None:
-    """合格的两条写入；未开确认/不存在的跳过并在回复里说明原因。"""
+    """一次给多个公告 → **明确拒绝**且不改动绑定（QQ 只允许 1 条）。"""
     from nonebot.adapters.onebot.v11 import Bot
 
     from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
@@ -243,23 +248,16 @@ async def test_notice_bind_skips_unconfirmed_and_reports(
         ctx.should_call_api(
             "_get_group_notice",
             {"group_id": _GROUP_ID},
-            result=[
-                _raw_notice("OK1", confirm=True),
-                _raw_notice("NO1", confirm=False),
-                _raw_notice("OK2", confirm=True),
-            ],
+            result=[_raw_notice("OK1", confirm=True), _raw_notice("OK2", confirm=True)],
         )
-        ctx.receive_event(bot, _event("设为验证公告 OK1 NO1 GHOST OK2"))
+        ctx.receive_event(bot, _event("设为验证公告 OK1 OK2"))
 
-    # 只有带确认环节且存在的两条真正写进绑定
-    assert (await notices.load_bindings())[_GROUP_ID] == ("OK1", "OK2")
+    # 静默丢掉多余的会让人以为绑上了 —— 所以这里是「两条都没绑」
+    assert (await notices.load_bindings()).get(_GROUP_ID) is None
 
     text = _last_text(sent)
-    assert "#1" in text and "#3" in text  # 汇报新增了什么（序号）
-    assert "OK1" not in text  # 不再回显长 id
-    assert "#2" in text and "GHOST" in text  # 汇报跳过了什么（序号 2 = NO1）
-    assert "确认" in text  # 未开确认的原因
-    assert "找不到" in text  # 不存在的原因
+    assert "只能绑定 1 条" in text
+    assert "QQ 只允许" in text
 
 
 @pytest.mark.asyncio
@@ -282,12 +280,47 @@ async def test_notice_bind_by_index(app: App, sent: list[dict[str, Any]]) -> Non
                 _raw_notice("CCC", confirm=True),  # 序号 3
             ],
         )
-        ctx.receive_event(bot, _event("设为验证公告 1 3"))
+        ctx.receive_event(bot, _event("设为验证公告 3"))
 
     # 序号被翻译成真实 id 后再校验与写入（存的是 id，不是序号）
-    assert (await notices.load_bindings())[_GROUP_ID] == ("AAA", "CCC")
+    assert (await notices.load_bindings())[_GROUP_ID] == ("CCC",)
     text = _last_text(sent)
-    assert "#1" in text and "#3" in text
+    assert "#3" in text
+
+
+@pytest.mark.asyncio
+async def test_notice_bind_replaces_previous(
+    app: App, sent: list[dict[str, Any]]
+) -> None:
+    """已绑定时再设另一条 → **直接替换**，并写明被顶掉的是哪条（不必先取消）。
+
+    用户 2026-10-08 拍板：QQ 只允许 1 条可确认公告，「追加」既无意义又会让第 2 条
+    永远读不齐、把所有人拦在门外。
+    """
+    from nonebot.adapters.onebot.v11 import Bot
+
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
+        notices,
+    )
+
+    await notices.bind_notices(_GROUP_ID, ["AAA"])
+
+    async with app.test_matcher(notice_cmd.notice_bind_cmd) as ctx:
+        bot = ctx.create_bot(base=Bot)
+        ctx.should_call_api(
+            "_get_group_notice",
+            {"group_id": _GROUP_ID},
+            result=[
+                _raw_notice("AAA", confirm=True),  # 序号 1（原绑定）
+                _raw_notice("CCC", confirm=True),  # 序号 2
+            ],
+        )
+        ctx.receive_event(bot, _event("设为验证公告 2"))
+
+    assert (await notices.load_bindings())[_GROUP_ID] == ("CCC",)
+    text = _last_text(sent)
+    assert "已替换掉原绑定：#1" in text  # 序号按列表算，不是绑进文件里的位置
+    assert "已设为验证公告：#2" in text
 
 
 @pytest.mark.asyncio
@@ -342,7 +375,7 @@ async def test_notice_bind_reports_existing_as_skipped(
         ctx.receive_event(bot, _event("设为验证公告 OK1"))
 
     assert (await notices.load_bindings())[_GROUP_ID] == ("OK1",)
-    assert "已在绑定中" in _last_text(sent)
+    assert "本来就是验证公告" in _last_text(sent)
 
 
 @pytest.mark.asyncio
@@ -459,13 +492,16 @@ async def test_notice_unbind_by_id(app: App, sent: list[dict[str, Any]]) -> None
         notices,
     )
 
-    await notices.bind_notices(_GROUP_ID, ["A", "B", "C"])
+    await notices.bind_notices(_GROUP_ID, ["B"])
+    await notices.bind_notices(868258211, ["X"])
 
     async with app.test_matcher(notice_cmd.notice_unbind_cmd) as ctx:
         bot = ctx.create_bot(base=Bot)
         ctx.receive_event(bot, _event("取消验证公告 B"))
 
-    assert (await notices.load_bindings())[_GROUP_ID] == ("A", "C")
+    bindings = await notices.load_bindings()
+    assert _GROUP_ID not in bindings  # 本条已解绑
+    assert bindings[868258211] == ("X",)  # 其它群不受影响
     assert "B" in _last_text(sent)
 
 
@@ -478,7 +514,7 @@ async def test_notice_unbind_all(app: App, sent: list[dict[str, Any]]) -> None:
         notices,
     )
 
-    await notices.bind_notices(_GROUP_ID, ["A", "B"])
+    await notices.bind_notices(_GROUP_ID, ["A"])
     await notices.bind_notices(868258211, ["X"])
 
     async with app.test_matcher(notice_cmd.notice_unbind_cmd) as ctx:

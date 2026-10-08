@@ -69,14 +69,20 @@ def _raw_notice(
     *,
     text: str = "公告正文",
     confirm: bool = True,
+    send_new_member: bool = True,
     pinned: bool = False,
 ) -> dict[str, Any]:
-    """构造一条接口原始公告（字段名与 LLBot 返回一致）。"""
+    """构造一条接口原始公告（字段名与 LLBot 返回一致）。
+
+    ``send_new_member`` 默认 True：只有「需要确认」+「发给新成员」都勾了才是可用公告
+    （用户 2026-10-08 说明的平台语义），所以「正常可用」的假数据两者都要给 True。
+    """
     return {
         "notice_id": notice_id,
         "message": {"text": text},
         "settings": {
             "confirm_required": confirm,
+            "send_new_member": send_new_member,
             "pinned": pinned,
             "is_show_edit_card": False,
         },
@@ -238,25 +244,33 @@ def test_preview_truncates_and_flattens() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bind_and_unbind_round_trip() -> None:
-    """绑定 → 读回 → 解绑 → 读回，都要如实反映。"""
-    added, already = await notices.bind_notices(1094538078, ["N1", "N2"])
-    assert added == ["N1", "N2"] and already == []
+async def test_bind_is_replace_only_and_capped_at_one() -> None:
+    """绑定是**覆盖式**且上限 1 条（QQ 只允许 1 条带「需要确认」的公告）。
 
-    bindings = await notices.load_bindings()
-    assert bindings == {1094538078: ("N1", "N2")}
+    2026-10-08 用户发现 QQ 收紧了这个限制：多绑的那些公告不收集已读回执，
+    而闸门又要「全部读齐」→ 所有人被永久拦住。所以改成「新绑覆盖旧的」。
+    """
+    added, already, replaced = await notices.bind_notices(1094538078, ["N1"])
+    assert added == ["N1"] and already == [] and replaced == []
+    assert await notices.load_bindings() == {1094538078: ("N1",)}
 
-    # 重复绑定只报告「已存在」，不重复写入
-    added2, already2 = await notices.bind_notices(1094538078, ["N2", "N3"])
-    assert added2 == ["N3"] and already2 == ["N2"]
-    assert (await notices.load_bindings())[1094538078] == ("N1", "N2", "N3")
+    # 再绑另一条 = **替换**（不是追加），并如实报告被顶掉的是哪条
+    added2, already2, replaced2 = await notices.bind_notices(1094538078, ["N2"])
+    assert added2 == ["N2"] and already2 == [] and replaced2 == ["N1"]
+    assert (await notices.load_bindings())[1094538078] == ("N2",)
+
+    # 绑的还是同一条 = 无改动
+    added3, already3, replaced3 = await notices.bind_notices(1094538078, ["N2"])
+    assert added3 == [] and already3 == ["N2"] and replaced3 == []
+
+    # 超限直接拒绝（不静默丢掉多余的），且绑定保持不变
+    with pytest.raises(notices.BindLimitError):
+        await notices.bind_notices(1094538078, ["N3", "N4"])
+    assert (await notices.load_bindings())[1094538078] == ("N2",)
 
     removed, missing = await notices.unbind_notices(1094538078, ["N2", "N9"])
     assert removed == ["N2"] and missing == ["N9"]
-    assert (await notices.load_bindings())[1094538078] == ("N1", "N3")
-
     # 解绑最后一个后该群条目消失（不留空群）
-    await notices.unbind_notices(1094538078, ["N1", "N3"])
     assert 1094538078 not in await notices.load_bindings()
 
 
@@ -322,16 +336,50 @@ async def test_load_bindings_swallows_read_errors(
 # ---------------------------------------------------------------------------
 
 
-def test_is_bindable_requires_confirm_required() -> None:
-    """带确认环节才可绑定；不带的一律拒绝并给出原因。"""
-    ok = notices.parse_notice(_raw_notice("A", confirm=True))
-    bad = notices.parse_notice(_raw_notice("B", confirm=False))
-    assert ok is not None and bad is not None
+def test_is_bindable_requires_confirm_and_send_to_new_member() -> None:
+    """**两个条件缺一不可**：需要确认 + 发给新成员。
+
+    用户 2026-10-08 说明：「确认」选项在没勾「发给新成员」时**不生效** ——
+    只有发布/更新公告时发到群内，QQ 才会收集确认数据。只查 confirm_required
+    会放行一条永远收不到回执的公告，闸门于是把所有人静默拦住（生产实测过）。
+    """
+    ok = notices.parse_notice(_raw_notice("A", confirm=True, send_new_member=True))
+    no_confirm = notices.parse_notice(_raw_notice("B", confirm=False))
+    no_send = notices.parse_notice(
+        _raw_notice("C", confirm=True, send_new_member=False)
+    )
+    assert ok is not None and no_confirm is not None and no_send is not None
 
     assert notices.is_bindable(ok) == (True, None)
-    allowed, reason = notices.is_bindable(bad)
+
+    allowed, reason = notices.is_bindable(no_confirm)
     assert allowed is False
     assert reason is not None and "确认" in reason
+
+    allowed2, reason2 = notices.is_bindable(no_send)
+    assert allowed2 is False, "没勾「发给新成员」的公告不该被判为可绑定"
+    assert reason2 is not None and "发给新成员" in reason2
+
+
+@pytest.mark.parametrize(
+    ("confirm", "send_new_member", "badge", "warn"),
+    [
+        (True, True, "可作验证公告", False),
+        (False, True, "未开确认", True),
+        (True, False, "未发给新成员", True),
+        (False, False, "未开确认", True),
+    ],
+)
+def test_bindable_badge_tells_which_condition_is_missing(
+    *, confirm: bool, send_new_member: bool, badge: str, warn: bool
+) -> None:
+    """角标要说清缺的是哪个条件（两者修法不同，混成一句会把人带偏）。"""
+    notice = notices.parse_notice(
+        _raw_notice("A", confirm=confirm, send_new_member=send_new_member)
+    )
+    assert notice is not None
+
+    assert notices.bindable_badge(notice) == (badge, warn)
 
 
 def test_resolve_bindable_splits_ok_and_skipped() -> None:
@@ -358,35 +406,29 @@ def test_resolve_bindable_splits_ok_and_skipped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_notice_read_passes_when_all_read() -> None:
-    """全部绑定公告都已读 → 放行。"""
-    await notices.bind_notices(111, ["N1", "N2"])
-    bot = FakeBot(
-        acklists={
-            "N1": [{"user_id": 42, "display_name": "我"}],
-            "N2": [{"user_id": "42"}],
-        }
-    )
+async def test_check_notice_read_passes_when_read() -> None:
+    """绑定公告已读 → 放行（名单里的 user_id 是字符串也要认）。"""
+    await notices.bind_notices(111, ["N1"])
+    bot = FakeBot(acklists={"N1": [{"user_id": "42", "display_name": "我"}]})
 
     gate = await notices.check_notice_read(bot, 111, 42)  # type: ignore[arg-type]
 
     assert gate.blocked is False
-    assert gate.detail["read"] == ["N1", "N2"]
-    # 两个公告都要查（漏查一条就等于没闸门）
-    assert [call[0] for call in bot.calls] == ["_get_group_notice_acklist"] * 2
+    assert gate.detail["read"] == ["N1"]
+    assert [call[0] for call in bot.calls] == ["_get_group_notice_acklist"]
 
 
 @pytest.mark.asyncio
-async def test_check_notice_read_blocks_on_any_unread() -> None:
-    """**任一**公告未读就拦下，并在原因里带上未读 id 供管理员对照。"""
-    await notices.bind_notices(111, ["N1", "N2"])
-    bot = FakeBot(acklists={"N1": [{"user_id": 42}], "N2": [{"user_id": 7}]})
+async def test_check_notice_read_blocks_when_unread() -> None:
+    """未读就拦下，并在 detail 里带上未读 id 供管理员对照。"""
+    await notices.bind_notices(111, ["N2"])
+    bot = FakeBot(acklists={"N2": [{"user_id": 7}]})
 
     gate = await notices.check_notice_read(bot, 111, 42)  # type: ignore[arg-type]
 
     assert gate.blocked is True
     assert gate.detail["unread"] == ["N2"]
-    assert gate.detail["read"] == ["N1"]
+    assert gate.detail["read"] == []
     assert "N2" in (gate.reason or "") or "N2" in str(gate.detail)
 
 
@@ -448,15 +490,32 @@ async def test_gate_degrades_on_api_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gate_degrades_when_multi_notice_lookup_fails_midway() -> None:
-    """多条绑定时中途失败也要降级（不能只查了一半就拦人）。"""
-    await notices.bind_notices(111, ["N1", "N2"])
-    bot = FakeBot(acklists={"N1": [{"user_id": 42}], "N2": None})
+async def test_gate_degrades_on_legacy_multi_binding() -> None:
+    """**历史遗留的多条绑定** → 降级放行，而不是「全部读齐」。
+
+    限制收紧之前绑的多条里，超出上限的那些公告根本不收集回执 —— 照旧按「全部读齐」
+    判定会让**所有人**被永久拦住（生产实测 0/4 人读齐过）。故降级 + 告警，
+    等管理员把绑定收敛到 1 条再恢复强制。
+    """
+    # 绕过 bind_notices 的上限（模拟限制收紧之前留下的旧数据）
+    await notices.save_bindings({111: ("N1", "N2")})
+    bot = FakeBot(acklists={"N1": [{"user_id": 42}], "N2": [{"user_id": 42}]})
 
     gate = await notices.check_notice_read(bot, 111, 42)  # type: ignore[arg-type]
 
     assert gate.blocked is False
-    assert gate.detail.get("skipped") == "api_error"
+    assert gate.detail.get("skipped") == "legacy_multi"
+    assert gate.detail["bound"] == ["N1", "N2"]
+    # 连查都不查：省掉无意义的接口调用（已经确定不强制了）
+    assert bot.calls == []
+
+
+def test_summary_describes_legacy_multi_binding() -> None:
+    """通过回执里也要如实说明「多条绑定所以没校验」。"""
+    summary = notices.NoticeSummary(skipped="legacy_multi")
+
+    assert "多条" in summary.describe()
+    assert summary.enforced is False
 
 
 @pytest.mark.asyncio

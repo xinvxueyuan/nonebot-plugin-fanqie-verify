@@ -57,8 +57,31 @@ DEFAULT_NOTICES: dict[str, Any] = {"groups": {}}
 #: 单条公告列表里最多展示多少条（防止一张图几十米长）。
 MAX_LISTED_NOTICES = 30
 
+#: 每个群**最多**能绑定的验证公告条数。
+#:
+#: ⚠️ 这是 **QQ 的平台限制**：QQ 后来把「带『需要确认』的群公告」限制为**每群最多 1 个**
+#: （2026-10-08 用户发现）。超出后第 2 条的已读名单不再收集 —— 而
+#: ``confirm_required`` 字段仍返回 true，于是插件会以为它可绑。
+#:
+#: 不设上限的后果**很严重**：闸门判定是「绑定公告必须**全部**读齐」，第 2 条的 acklist
+#: 永远拿不到人 → 所有新成员永久卡在「未确认阅读群公告」（实测：某群绑 2 条后
+#: 0/4 个成员读齐过，其中一条 0 人已读）。
+MAX_BOUND_NOTICES = 1
+
 #: 文本预览长度上限。
 PREVIEW_LEN = 60
+
+
+class BindLimitError(ValueError):
+    """绑定条数超过 QQ 平台允许的上限（见 :data:`MAX_BOUND_NOTICES`）。
+
+    单独定类而不直接抛 ``ValueError``：调用方需要把「条数超限」与其它非法输入区分开，
+    而 ``ValueError`` 说明不了是哪一种。
+    """
+
+    def __init__(self, count: int) -> None:
+        """按实际收到的条数生成提示（消息留在异常类里，便于统一措辞）。"""
+        super().__init__(f"最多 {MAX_BOUND_NOTICES} 条（QQ 限制），收到 {count} 条")
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +93,8 @@ class GroupNotice:
         text: 公告正文纯文本。
         publish_time: 发布时间（unix 秒）。
         confirm_required: 是否要求成员**确认阅读**（QQ 的「需要确认」开关）。
+        send_new_member: 是否勾了「**发给新成员**」（``settings.send_new_member``，
+            协议端实现是 ``feed.type === 20``）。
         pinned: 是否置顶。
         is_show_edit_card: 是否显示「引导修改群名片」。
         sender_id: 发布者 QQ。
@@ -80,6 +105,8 @@ class GroupNotice:
     text: str = ""
     publish_time: int = 0
     confirm_required: bool = False
+    #: ⚠️ 与 ``confirm_required`` **同为必填条件**，见 :func:`is_bindable`。
+    send_new_member: bool = False
     pinned: bool = False
     is_show_edit_card: bool = False
     sender_id: int = 0
@@ -147,6 +174,7 @@ def parse_notice(raw: Any) -> GroupNotice | None:
         text=text,
         publish_time=publish_time,
         confirm_required=bool(settings.get("confirm_required")),
+        send_new_member=bool(settings.get("send_new_member")),
         pinned=bool(settings.get("pinned")),
         is_show_edit_card=bool(settings.get("is_show_edit_card")),
         sender_id=sender_id,
@@ -223,27 +251,43 @@ async def save_bindings(bindings: dict[int, tuple[str, ...]]) -> None:
 
 async def bind_notices(
     group_id: int, notice_ids: list[str]
-) -> tuple[list[str], list[str]]:
-    """把公告 id 追加绑定到某个群。
+) -> tuple[list[str], list[str], list[str]]:
+    """设置某个群的验证公告（**覆盖式**，最多 :data:`MAX_BOUND_NOTICES` 条）。
+
+    语义（用户 2026-10-08 拍板）：**新绑覆盖旧的** —— QQ 只允许 1 条带「需要确认」的
+    公告，所以「追加」没有意义、还会把第 2 条变成永远读不齐、把所有人拦在门外。
+    管理员直接发「设为验证公告 <序号>」即可换成另一条，不必先取消。
+
+    Args:
+        group_id: 群号。
+        notice_ids: 期望绑定的公告 id（≤ :data:`MAX_BOUND_NOTICES` 条；调用方**必须**
+            先做数量校验，这里的超限报错是最后一道防线）。
 
     Returns:
-        ``(新增的 id, 已存在而跳过的 id)``。
+        ``(新绑上的 id, 本来就在的 id, 被顶掉的旧 id)``。
+
+    Raises:
+        BindLimitError: 传入条数超过 :data:`MAX_BOUND_NOTICES`（QQ 平台限制）。
 
     """
+    unique = list(dict.fromkeys(notice_ids))
+    if len(unique) > MAX_BOUND_NOTICES:
+        raise BindLimitError(len(unique))
+
     bindings = await load_bindings()
     current = list(bindings.get(group_id, ()))
-    added: list[str] = []
-    already: list[str] = []
-    for notice_id in notice_ids:
-        if notice_id in current:
-            already.append(notice_id)
-        else:
-            current.append(notice_id)
-            added.append(notice_id)
-    if added:
-        bindings[group_id] = tuple(current)
-        await save_bindings(bindings)
-    return added, already
+
+    wanted = set(unique)
+    already = [n for n in unique if n in current]
+    added = [n for n in unique if n not in current]
+    replaced = [n for n in current if n not in wanted]
+
+    if not added and not replaced:
+        return [], already, []
+
+    bindings[group_id] = tuple(unique)
+    await save_bindings(bindings)
+    return added, already, replaced
 
 
 async def unbind_notices(
@@ -332,10 +376,15 @@ def acklist_user_ids(entries: list[dict[str, Any]]) -> set[int]:
 
 
 async def check_notice_read(bot: Bot, group_id: int, user_id: int) -> NoticeGate:
-    """入群验证的公告闸门：该成员是否已确认阅读群内**全部**绑定公告。
+    """入群验证的公告闸门：该成员是否已确认阅读群内绑定的公告。
 
     降级（都返回 ``blocked=False`` 并在 ``detail["skipped"]`` 里说明）：
-    未启用 / 该群未绑定 / 接口调用失败。
+    未启用 / 该群未绑定 / 接口调用失败 / **历史遗留的多条绑定**。
+
+    历史遗留（``> MAX_BOUND_NOTICES`` 条，来自限制收紧之前绑的）：只读齐不了，
+    因为超出上限的那些公告根本不收集回执 —— 若照旧按「全部读齐」判定，
+    **所有人会被永久拦住**（生产实测 0/4 人读齐过）。故此时降级放行 + 告警，
+    由管理员把绑定收敛到 1 条后再恢复强制。
     """
     from ...core.config import plugin_config
 
@@ -346,6 +395,20 @@ async def check_notice_read(bot: Bot, group_id: int, user_id: int) -> NoticeGate
     notice_ids = bindings.get(group_id, ())
     if not notice_ids:
         return NoticeGate(blocked=False, detail={"skipped": "no_binding"})
+
+    if len(notice_ids) > MAX_BOUND_NOTICES:
+        logger.warning(
+            "群 {} 绑定了 {} 条验证公告，超过 QQ 限制（{} 条）—— 本次闸门降级放行；"
+            "请用「取消验证公告」把绑定收敛到 {} 条",
+            group_id,
+            len(notice_ids),
+            MAX_BOUND_NOTICES,
+            MAX_BOUND_NOTICES,
+        )
+        return NoticeGate(
+            blocked=False,
+            detail={"skipped": "legacy_multi", "bound": list(notice_ids)},
+        )
 
     unread: list[str] = []
     read: list[str] = []
@@ -381,6 +444,15 @@ class ConfirmedNotice:
     preview: str = ""
 
 
+#: 闸门「未校验」原因 → 对外说明（卡片与纯文本同口径）。
+_SKIPPED_TEXT: dict[str, str] = {
+    "disabled": "本群公告检查已关闭（无需确认公告）。",
+    "no_binding": "本群未设置验证公告（无需确认公告）。",
+    "api_error": "公告接口暂不可用，本次未校验公告阅读情况。",
+    "legacy_multi": "本群绑定了多条验证公告（超出 QQ 限制），本次未校验公告阅读情况。",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class NoticeSummary:
     """闸门结果的对外摘要 —— 让「公告有没有被确认」这件事**看得见**。
@@ -401,14 +473,11 @@ class NoticeSummary:
 
     def describe(self) -> str:
         """一行说明，卡片与纯文本回退共用（保证两种媒介口径一致）。"""
-        if self.skipped == "disabled":
-            return "本群公告检查已关闭（无需确认公告）。"
-        if self.skipped == "no_binding":
-            return "本群未设置验证公告（无需确认公告）。"
-        if self.skipped == "api_error":
-            return "公告接口暂不可用，本次未校验公告阅读情况。"
+        if self.skipped:
+            # 「未校验」的几种原因分别说清（查表而不是罗列 if，分支数才有上限）
+            return _SKIPPED_TEXT.get(self.skipped, _SKIPPED_TEXT["no_binding"])
         if not self.enforced:
-            return "本群未设置验证公告（无需确认公告）。"
+            return _SKIPPED_TEXT["no_binding"]
         labels = [item.label for item in self.confirmed if item.label]
         if labels:
             return f"已确认阅读公告 {'、'.join(labels)}（本群共要求 {self.bound} 条）。"
@@ -456,8 +525,16 @@ async def build_notice_summary(bot: Bot, group_id: int, user_id: int) -> NoticeS
 def is_bindable(notice: GroupNotice) -> tuple[bool, str | None]:
     """这条公告能不能拿来当验证公告。
 
-    用户 2026-10-07 要求：**必须校验该公告是否带确认环节**，不然「已读名单」
-    根本没有意义（没开确认的公告，QQ 不收集阅读回执）。
+    **两个条件缺一不可**（平台语义，用户 2026-10-08 说明 + 协议端实现佐证）：
+
+    1. 「需要确认」（``settings.confirm_required``）；
+    2. 「**发给新成员**」（``settings.send_new_member``）—— **只有勾了它，QQ 才会在
+       发布/更新公告时把公告发到群里、并开始收集确认数据**；没勾的话
+       ``confirm_required`` 即使为 true 也**不生效**，已读名单永远为空。
+
+    第 2 条是不设就会「静默全拦」的那种坑：公告看起来可绑（``confirm_required=true``），
+    绑上后 ``acklist`` 却永远查不到任何人 → 闸门把**所有**新成员挡在门外。
+    生产实测就撞到过（某群绑 2 条，其中一条对 4 个成员 0 次已读、0/4 人读齐）。
 
     Returns:
         ``(可否绑定, 不可绑定的原因)``。
@@ -465,7 +542,22 @@ def is_bindable(notice: GroupNotice) -> tuple[bool, str | None]:
     """
     if not notice.confirm_required:
         return False, "该公告未开启「需要确认」（无已读名单可查）"
+    if not notice.send_new_member:
+        return False, "该公告未勾选「发给新成员」（不勾则确认不生效、收不到回执）"
     return True, None
+
+
+def bindable_badge(notice: GroupNotice) -> tuple[str, bool]:
+    """列表里给这条公告的短角标 ``(文本, 是否警示色)``。
+
+    把「为什么不能绑」说出来 —— 只说「未开确认」会把「没勾发给新成员」这条也盖进去，
+    而两者的修法不同（后者要去公告设置里重新发布/更新并勾上「发给新成员」）。
+    """
+    if notice.confirm_required and notice.send_new_member:
+        return "可作验证公告", False
+    if not notice.confirm_required:
+        return "未开确认", True
+    return "未发给新成员", True
 
 
 def notice_index_map(notices: Sequence[GroupNotice]) -> dict[str, int]:
@@ -584,15 +676,18 @@ def resolve_bindable(
 
 __all__ = [
     "DEFAULT_NOTICES",
+    "MAX_BOUND_NOTICES",
     "MAX_LISTED_NOTICES",
     "NOTICES_FILENAME",
     "PREVIEW_LEN",
+    "BindLimitError",
     "ConfirmedNotice",
     "GroupNotice",
     "NoticeGate",
     "NoticeSummary",
     "acklist_user_ids",
     "bind_notices",
+    "bindable_badge",
     "build_notice_summary",
     "check_notice_read",
     "fetch_acklist",

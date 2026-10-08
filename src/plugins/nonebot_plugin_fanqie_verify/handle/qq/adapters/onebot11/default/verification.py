@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from functools import wraps
+from functools import partial, wraps
 from typing import Any
 
 from nonebot import logger
@@ -1125,7 +1125,8 @@ async def on_notice_list(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
         can, _reason = notice_service.is_bindable(notice)
         if can:
             bindable_count += 1
-        badge = "可作验证公告" if can else "未开确认"
+        # 角标要说清「为什么不能绑」：未开确认 vs 没勾「发给新成员」（修法不同）
+        badge, badge_warn = notice_service.bindable_badge(notice)
         if notice.notice_id in bound:
             badge += " / 已绑定"
         meta_bits = []
@@ -1139,7 +1140,7 @@ async def on_notice_list(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
                 # 主文本用 #序号（用户 2026-10-07 要求：不要那串长公告 id）
                 id_text=notice_service.notice_label(index_map, notice.notice_id),
                 badge=badge,
-                badge_warn=not can,
+                badge_warn=badge_warn,
                 preview=notice.preview or "（无正文）",
                 meta="  ".join(meta_bits),
             )
@@ -1147,13 +1148,15 @@ async def on_notice_list(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
 
     footer = (
         f"共 {len(notices)} 条公告，其中 {bindable_count} 条"
-        "带「确认阅读」可作验证公告。" + "\n"
-        "用「设为验证公告 <序号>」绑定（如 设为验证公告 1 3，空格分隔）。"
+        "带「确认阅读」可作验证公告。\n"
+        "用「设为验证公告 <序号>」绑定（只填 1 个序号）。"
     )
     card = notice_render.Card(
         title="本群公告列表",
         lines=[
-            "每项前面的 **#数字** 就是序号（按本列表顺序），绑定/取消时填这个数字即可。"
+            "每项前面的 **#数字** 就是序号（按列表顺序），绑定/取消填这个数字即可。",
+            f"⚠️ 可用公告要同时勾「需要确认」与「发给新成员」，"
+            f"且每群仅 {notice_service.MAX_BOUND_NOTICES} 条。",
         ],
         rows=rows,
         tone="info",
@@ -1202,11 +1205,11 @@ async def on_notice_show(bot: OneBot11Bot, event: GroupMessageEvent) -> None:
 
     card = notice_render.Card(
         title="本群验证公告",
-        lines=["未确认阅读**全部**下列公告的新成员，验证会被判不通过。"],
+        lines=["未确认阅读下列公告的新成员，验证会被判不通过。"],
         rows=rows,
         tone="info",
         footer=(
-            "用「取消验证公告 <id>」解除绑定。\n"
+            "用「取消验证公告 <序号>」解除绑定。\n"
             "接口不可用 / 群内未绑定公告时，验证**不拦截**（降级放行）。"
         ),
     )
@@ -1228,12 +1231,14 @@ async def on_notice_bind(
             notice_render.Card(
                 title="用法",
                 lines=[
-                    "设为验证公告 <序号> [序号...]",
+                    "设为验证公告 <序号>",
                     "序号用「获取群公告列表」查询。",
+                    f"每个群只能设 {notice_service.MAX_BOUND_NOTICES} 条"
+                    "（QQ 限制），重设会替换原来那条。",
                 ],
                 tone="warn",
             ),
-            "用法：设为验证公告 <序号> [序号...]（序号用「获取群公告列表」查）",
+            "用法：设为验证公告 <序号>（序号用「获取群公告列表」查；只能设 1 条）",
         )
         return
 
@@ -1255,32 +1260,50 @@ async def on_notice_bind(
         return
 
     resolved, passthrough = notice_service.resolve_notice_tokens(live, requested)
-    ok, skipped = notice_service.resolve_bindable(live, [*resolved, *passthrough])
-    added, already = (
+    targets = [*resolved, *passthrough]
+    index_map = notice_service.notice_index_map(live)
+    label = partial(notice_service.notice_label, index_map)
+
+    # QQ 只允许 1 条带「需要确认」的公告（见 MAX_BOUND_NOTICES）。超量时**明确拒绝**，
+    # 不做「静默丢掉多余的」—— 管理员以为绑上了、实际没有，是最坏的体验。
+    if len(targets) > notice_service.MAX_BOUND_NOTICES:
+        card = notice_render.Card(
+            title="一次只能绑定 1 条",
+            lines=[
+                "QQ 只允许每个群设置 "
+                f"{notice_service.MAX_BOUND_NOTICES} 条带「需要确认」的公告；"
+                "多绑的那些**不会收集已读**，成员永远读不齐、验证会被一直拦住。",
+                "请只填 1 个序号，例如：设为验证公告 1",
+                "（已在绑定中的那条会被自动替换，不必先取消。）",
+            ],
+            tone="warn",
+        )
+        await _send_notice_card(bot, event, card, _card_fallback_text(card))
+        return
+
+    ok, skipped = notice_service.resolve_bindable(live, targets)
+    added, already, replaced = (
         await notice_service.bind_notices(
             event.group_id, [notice.notice_id for notice in ok]
         )
         if ok
-        else ([], [])
+        else ([], [], [])
     )
 
-    index_map = notice_service.notice_index_map(live)
     lines: list[str] = []
     if added:
-        lines.append(
-            f"本次新增 {len(added)} 条："
-            + "、".join(notice_service.notice_label(index_map, x) for x in added)
-        )
+        lines.append("已设为验证公告：" + "、".join(label(x) for x in added))
+    if replaced:
+        lines.append("已替换掉原绑定：" + "、".join(label(x) for x in replaced))
     if already:
         lines.append(
-            "已在绑定中（跳过）："
-            + "、".join(notice_service.notice_label(index_map, x) for x in already)
+            "本来就是验证公告（未改动）：" + "、".join(label(x) for x in already)
         )
     rows: list[notice_render.Row] = []
     for notice_id, reason in skipped:
         rows.append(
             notice_render.Row(
-                id_text=notice_service.notice_label(index_map, notice_id),
+                id_text=label(notice_id),
                 badge="跳过",
                 badge_warn=True,
                 preview=reason,
@@ -1289,7 +1312,12 @@ async def on_notice_bind(
     if not added and not already:
         lines.append("没有成功绑定任何公告。")
     current = (await notice_service.load_bindings()).get(event.group_id, ())
-    footer = f"本群当前共绑定 {len(current)} 条验证公告。"
+    footer = (
+        "本群当前验证公告：" + "、".join(label(x) for x in current) + "\n"
+        f"QQ 只允许 {notice_service.MAX_BOUND_NOTICES} 条带「需要确认」的公告。"
+        if current
+        else "本群当前未绑定验证公告。"
+    )
     card = notice_render.Card(
         title="设为验证公告",
         lines=lines,
