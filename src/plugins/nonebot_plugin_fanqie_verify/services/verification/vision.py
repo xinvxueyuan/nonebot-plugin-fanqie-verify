@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import logging
 from typing import TYPE_CHECKING, Any
 
 from nonebot import logger
@@ -25,7 +24,8 @@ from . import policy
 if TYPE_CHECKING:
     from .models import ReadingEvidence
 
-_logger = logging.getLogger(__name__)
+# HTTP 状态码语义常量。
+_STATUS_INSUFFICIENT_BALANCE = 402
 
 # 视觉模型判定结果 JSON 中的字段名（英文键，跨模型稳定）。
 _VERDICT_PROMPT = """\
@@ -190,11 +190,31 @@ def _verdict_to_evidence(verdict: VisionVerdict) -> ReadingEvidence:
 verdict_to_evidence = _verdict_to_evidence
 
 
+class VisionInsufficientBalanceError(Exception):
+    """视觉调用被 API 以「账户余额不足」（HTTP 402）拒绝。
+
+    由 :func:`vision_fallback` 识别到该状态时抛出；调用方（flow）据此把
+    成员文案替换为极简的「账户余额不足」。
+    """
+
+
+def _is_insufficient_balance(exc: OpenAIError) -> bool:
+    """判定异常是否为「账户余额不足」：HTTP 402 或响应体携带该提示。"""
+    if getattr(exc, "status_code", None) == _STATUS_INSUFFICIENT_BALANCE:
+        return True
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        message = str(body.get("message") or body.get("error") or "")
+        return "insufficient balance" in message.lower()
+    return False
+
+
 async def vision_fallback(image_url: str, group_id: int) -> VisionVerdict | None:
     """用视觉模型对截图做兜底判定。
 
     未启用、未配置 key 或调用失败时返回 ``None``（由调用方回退到原有
-    失败处理）。调用成功时返回 :class:`VisionVerdict`。
+    失败处理）。调用成功时返回 :class:`VisionVerdict`。调用被 API 以
+    「账户余额不足」（HTTP 402）拒绝时抛 :class:`VisionInsufficientBalanceError`。
 
     Args:
         image_url: 截图的可公开访问 URL。
@@ -211,7 +231,11 @@ async def vision_fallback(image_url: str, group_id: int) -> VisionVerdict | None
     prompt = _build_prompt(group_id)
 
     try:
-        client = AsyncOpenAI(api_key=key, base_url=base)
+        client = AsyncOpenAI(
+            api_key=key,
+            base_url=base,
+            timeout=plugin_config.fanqie_vision_timeout,
+        )
         completion = await client.chat.completions.create(
             model=model,
             messages=[
@@ -225,7 +249,15 @@ async def vision_fallback(image_url: str, group_id: int) -> VisionVerdict | None
             ],
         )
     except OpenAIError as exc:
-        logger.warning("视觉兜底调用异常: %s", exc)
+        if _is_insufficient_balance(exc):
+            logger.warning(
+                "视觉调用被拒：账户余额不足（HTTP 402） group={} model={}: {}",
+                group_id,
+                model,
+                exc,
+            )
+            raise VisionInsufficientBalanceError(str(exc)) from exc
+        logger.warning("视觉兜底调用异常: {}", exc)
         return None
 
     content = _completion_content(completion)
@@ -233,7 +265,7 @@ async def vision_fallback(image_url: str, group_id: int) -> VisionVerdict | None
         return None
     parsed = _parse_content(content)
     if parsed is None:
-        logger.warning("视觉兜底响应无法解析为 JSON: %s", content[:200])
+        logger.warning("视觉兜底响应无法解析为 JSON: {}", content[:200])
         return None
     return _verdict_from_dict(parsed, raw=content, prompt=prompt, model=model)
 
@@ -256,7 +288,7 @@ def _completion_content(completion: Any) -> str | None:
     try:
         content = completion.choices[0].message.content
     except (AttributeError, IndexError, TypeError) as exc:
-        logger.warning("视觉兜底响应缺少 content: %s", exc)
+        logger.warning("视觉兜底响应缺少 content: {}", exc)
         return None
     if not isinstance(content, str) or not content.strip():
         logger.warning("视觉兜底响应 content 为空")

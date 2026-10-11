@@ -47,7 +47,7 @@ def _on_background_task_done(task: asyncio.Task[Any]) -> None:
     exc = task.exception()
     if exc is None:
         return
-    logger.exception("Background task %s failed", task.get_name(), exc_info=exc)
+    logger.opt(exception=exc).error("Background task {} failed", task.get_name())
 
 
 async def drain_background_tasks(

@@ -265,6 +265,42 @@ class TestVisionFallback:
         ):
             assert await vision.vision_fallback("http://x/img.jpg", 123) is None
 
+    @pytest.mark.asyncio
+    async def test_client_timeout_uses_configured_value(self) -> None:
+        """AsyncOpenAI 必须收到 timeout=<fanqie_vision_timeout>。"""
+        content = json.dumps({"passed": True, "reason": None})
+        completion = self._mock_completion(content)
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=completion)
+        openai_cls = MagicMock(return_value=client)
+
+        with (
+            patch.object(vision.plugin_config, "fanqie_vision_enabled", new=True),
+            patch.object(vision.plugin_config, "fanqie_vision_api_key", "sk-test"),
+            patch.object(
+                vision.plugin_config,
+                "fanqie_vision_api_base",
+                "https://api.deepseek.com",
+            ),
+            patch.object(
+                vision.plugin_config,
+                "fanqie_vision_model",
+                "deepseek-v4-flash-vision-exp",
+            ),
+            patch.object(vision.plugin_config, "fanqie_vision_timeout", 60.0),
+            patch(
+                "src.plugins.nonebot_plugin_fanqie_verify.services.verification.vision.AsyncOpenAI",
+                openai_cls,
+            ),
+        ):
+            await vision.vision_fallback("http://x/img.jpg", 123)
+
+        openai_cls.assert_called_once_with(
+            api_key="sk-test",
+            base_url="https://api.deepseek.com",
+            timeout=60.0,
+        )
+
 
 # ---------------------------------------------------------------------------
 # 提示词必须保留「发布者不能是作者」这条（生产走仅视觉，丢了就没人拦）
@@ -278,3 +314,63 @@ def test_prompt_carries_reviewer_not_author_rule() -> None:
     assert "发布者" in prompt
     assert "不能是上述白名单作者" in prompt
     assert "5." in prompt
+
+
+# ---------------------------------------------------------------------------
+# 402 账户余额不足：判定函数（鸭子类型）+ 从 vision_fallback 抛出专属异常
+# ---------------------------------------------------------------------------
+
+
+def _make_error_with(
+    status_code: int | None, body: object | None
+) -> vision.OpenAIError:
+    """构造带 status_code/body 属性的 OpenAIError（判定函数是鸭子类型）。"""
+    exc = vision.OpenAIError("test")
+    if status_code is not None:
+        exc.status_code = status_code  # type: ignore[attr-defined]
+    if body is not None:
+        exc.body = body  # type: ignore[attr-defined]
+    return exc
+
+
+def test_is_insufficient_balance_variants() -> None:
+    assert vision._is_insufficient_balance(_make_error_with(402, None)) is True
+    assert (
+        vision._is_insufficient_balance(
+            _make_error_with(None, {"error": {"message": "Insufficient Balance"}})
+        )
+        is True
+    )
+    assert vision._is_insufficient_balance(_make_error_with(500, None)) is False
+    assert vision._is_insufficient_balance(vision.OpenAIError("plain")) is False
+
+
+@pytest.mark.asyncio
+async def test_insufficient_balance_raises_from_fallback() -> None:
+    """402 → 抛 VisionInsufficientBalanceError（真实异常类构造，探针已验）。"""
+    import httpx2
+    from openai import APIStatusError
+
+    req = httpx2.Request("POST", "https://api.deepseek.com/chat/completions")
+    resp = httpx2.Response(402, request=req)
+    err = APIStatusError(
+        "Insufficient Balance",
+        response=resp,
+        body={"error": {"message": "Insufficient Balance"}},
+    )
+    with (
+        patch.object(vision.plugin_config, "fanqie_vision_enabled", new=True),
+        patch.object(vision.plugin_config, "fanqie_vision_api_key", "sk-test"),
+        patch.object(
+            vision.plugin_config, "fanqie_vision_api_base", "https://api.deepseek.com"
+        ),
+        patch.object(
+            vision.plugin_config, "fanqie_vision_model", "deepseek-v4-flash-vision-exp"
+        ),
+        patch(
+            "src.plugins.nonebot_plugin_fanqie_verify.services.verification.vision.AsyncOpenAI",
+            side_effect=err,
+        ),
+        pytest.raises(vision.VisionInsufficientBalanceError),
+    ):
+        await vision.vision_fallback("http://x/img.jpg", 123)

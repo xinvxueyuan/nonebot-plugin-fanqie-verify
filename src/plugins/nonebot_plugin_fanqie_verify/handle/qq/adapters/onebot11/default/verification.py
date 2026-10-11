@@ -103,7 +103,7 @@ def wrapped[T: Callable[..., Awaitable[Any]]](func: T) -> T:
         try:
             return await func(*args, **kwargs)
         except Exception:
-            logger.exception("验证处理器异常: %s", func.__name__)
+            logger.exception("验证处理器异常: {}", func.__name__)
             return None
 
     return wrapper  # type: ignore[return-value]
@@ -157,7 +157,7 @@ async def on_group_decrease(
         cleared = await handle_bot_left_group(group_id=str(event.group_id))
         if cleared:
             logger.info(
-                "机器人已离开群 %s（%s），终止 %s 个会话",
+                "机器人已离开群 {}（{}），终止 {} 个会话",
                 event.group_id,
                 event.sub_type,
                 cleared,
@@ -183,7 +183,7 @@ async def on_group_admin_change(
     if event.sub_type == "set":
         store.end(str(event.group_id), str(event.user_id), status="approved")
         logger.info(
-            "成员 %s 在群 %s 被设为管理员，直接放行",
+            "成员 {} 在群 {} 被设为管理员，直接放行",
             event.user_id,
             event.group_id,
         )
@@ -201,7 +201,7 @@ async def on_group_ban(
         if record is not None:
             store.set_muted(str(event.group_id), str(event.user_id), is_muted=True)
             logger.debug(
-                "成员 %s 在群 %s 被禁言（时长 %s 秒）",
+                "成员 {} 在群 {} 被禁言（时长 {} 秒）",
                 event.user_id,
                 event.group_id,
                 event.duration,

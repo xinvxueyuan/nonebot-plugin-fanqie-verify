@@ -350,7 +350,17 @@ async def _handle_vision_fallback(
     record: SessionRecord,
 ) -> Reply:
     """OCR 识别不出（或 OCR 已停用）时改用视觉模型看图判定。"""
-    verdict = await vision.vision_fallback(image_url, group_id)
+    try:
+        verdict = await vision.vision_fallback(image_url, group_id)
+    except vision.VisionInsufficientBalanceError as exc:
+        logger.warning(
+            "视觉判定不可用：API 账户余额不足 group={} user={} trace={}: {}",
+            group_id,
+            user_id,
+            record.trace_id,
+            exc,
+        )
+        return await _increment_retry(bot, group_id, user_id, kind=VISION_BALANCE_KIND)
     if verdict is not None:
         fallback_evidence = vision.verdict_to_evidence(verdict)
         await _persist_last_extracted(record, fallback_evidence)
@@ -420,7 +430,17 @@ async def _vision_review(
     视觉模型否决则拒绝；通过或不可用则放行。
 
     """
-    vision_verdict = await vision.vision_fallback(image_url, group_id)
+    try:
+        vision_verdict = await vision.vision_fallback(image_url, group_id)
+    except vision.VisionInsufficientBalanceError as exc:
+        logger.warning(
+            "视觉复核不可用：API 账户余额不足 group={} user={} trace={}: {}",
+            group_id,
+            user_id,
+            record.trace_id,
+            exc,
+        )
+        vision_verdict = None
     if vision_verdict is not None:
         await _record_event(
             record,
@@ -931,6 +951,21 @@ async def _handle_download_failure(group_id: int, user_id: int) -> str:
     return "图片获取失败，请重新发送清晰的截图。"
 
 
+# 视觉调用因「账户余额不足」（HTTP 402）失败时的专属重试类别：
+# 成员文案直接显示该句，与普通「识别失败」区分。
+VISION_BALANCE_KIND = "账户余额不足"
+
+
+def _cap_member_reply(kind: str, trace: str | None) -> str:
+    """达上限时给成员的收尾文案（余额不足走极简专属文案）。"""
+    if kind == VISION_BALANCE_KIND:
+        return f"{kind}{_trace_suffix(trace)}"
+    return (
+        f"连续 {plugin_config.fanqie_max_attempts} 次识别失败，已通知管理员处理。"
+        f"{_trace_suffix(trace)}"
+    )
+
+
 async def _increment_retry(
     bot: Bot,
     group_id: int,
@@ -969,6 +1004,8 @@ async def _increment_retry(
     remaining = plugin_config.fanqie_max_attempts - updated.retry_count
     trace = updated.trace_id
     if remaining > 0:
+        if kind == VISION_BALANCE_KIND:
+            return f"{kind}{_trace_suffix(trace)}"
         base = f"{kind}，请重新发送清晰的截图（剩余尝试次数：{remaining}）。"
         if kind == "信息不足":
             base += (
@@ -994,10 +1031,7 @@ async def _increment_retry(
                 f"{_trace_suffix(trace)}"
             ),
         )
-        return (
-            f"连续 {plugin_config.fanqie_max_attempts} 次识别失败，已通知管理员处理。"
-            f"{_trace_suffix(trace)}"
-        )
+        return _cap_member_reply(kind, trace)
 
     await _await_admin_decision(
         bot,
@@ -1010,10 +1044,7 @@ async def _increment_retry(
         ),
         evidence=evidence,
     )
-    return (
-        f"连续 {plugin_config.fanqie_max_attempts} 次识别失败，已通知管理员处理。"
-        f"{_trace_suffix(trace)}"
-    )
+    return _cap_member_reply(kind, trace)
 
 
 async def _handle_pass(
@@ -1541,6 +1572,7 @@ async def restore_pending_sessions() -> int:
             is_muted=row.is_muted,
             last_extracted=row.last_extracted,
             status=row.status,
+            trace_id=row.trace_id,
         )
         store.restore(record)
         restored += 1

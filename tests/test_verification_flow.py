@@ -1244,6 +1244,7 @@ async def test_restore_pending_sessions(
             is_muted=False,
             last_extracted=None,
             status="waiting",
+            trace_id="t-waiting-0000000000000000000000000",
         ),
         SimpleNamespace(
             group_id="123",
@@ -1259,6 +1260,7 @@ async def test_restore_pending_sessions(
             is_muted=False,
             last_extracted=None,
             status="awaiting_admin",
+            trace_id="t-await-00000000000000000000000000",
         ),
     ]
 
@@ -1288,6 +1290,15 @@ async def test_restore_pending_sessions(
     # 重审计数应从数据库恢复，重启后不丢
     assert waiting is not None and waiting.review_count == 2
     assert awaiting is not None and awaiting.review_count == 1
+    # trace_id 也要随恢复保留，重启后成员文案的后缀不丢
+    assert (
+        waiting is not None
+        and waiting.trace_id == "t-waiting-0000000000000000000000000"
+    )
+    assert (
+        awaiting is not None
+        and awaiting.trace_id == "t-await-00000000000000000000000000"
+    )
 
 
 def _ocr_result_with_evidence() -> Any:
@@ -1822,3 +1833,115 @@ async def test_private_submission_multi_group_with_target(
 
 def _box(y: int) -> list[list[int]]:
     return [[0, y], [100, y], [100, y + 20], [0, y + 20]]
+
+
+# ---------------------------------------------------------------------------
+# 视觉调用 402（账户余额不足）：专属 kind + 极简成员文案（流程语义不变）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_vision_insufficient_balance_member_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """余额不足：重试条 = 极简「账户余额不足」+后缀；事件 kind 可辨。"""
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
+        vision as vision_module,
+    )
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(plugin_config, "fanqie_max_attempts", 3)
+    monkeypatch.setattr(
+        flow_module.vision,
+        "vision_fallback",
+        AsyncMock(
+            side_effect=vision_module.VisionInsufficientBalanceError(
+                "Insufficient Balance"
+            )
+        ),
+    )
+
+    events: list[tuple[str | None, dict | None]] = []
+
+    async def capture_event(_record: Any, **kwargs: Any) -> None:
+        events.append((kwargs.get("event_type"), kwargs.get("detail")))
+
+    monkeypatch.setattr(flow_module, "_record_event", capture_event)
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    reply = await handle_submission(
+        bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+    )
+
+    text = _reply_text(reply)
+    assert text.startswith("账户余额不足")
+    assert "请重新发送" not in text
+    assert "剩余尝试次数" not in text
+    record = get_session_store().get("123", "10001")
+    assert record is not None
+    assert record.retry_count == 1
+    assert record.status == "waiting"
+
+    retry_details = [d for (t, d) in events if t == "verify.retry"]
+    assert retry_details, events
+    assert retry_details[0] is not None
+    assert retry_details[0]["kind"] == "账户余额不足"
+
+
+@pytest.mark.asyncio
+async def test_vision_insufficient_balance_cap_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """连挂 3 次：收尾条同为极简句；仍正常转待管理员决策（文案极简不改流程）。"""
+    from unittest.mock import AsyncMock
+
+    from src.plugins.nonebot_plugin_fanqie_verify.core.config import plugin_config
+    from src.plugins.nonebot_plugin_fanqie_verify.services.verification import (
+        vision as vision_module,
+    )
+
+    monkeypatch.setattr(plugin_config, "fanqie_ocr_enabled", False)
+    monkeypatch.setattr(plugin_config, "fanqie_max_attempts", 3)
+    monkeypatch.setattr(
+        flow_module.vision,
+        "vision_fallback",
+        AsyncMock(
+            side_effect=vision_module.VisionInsufficientBalanceError(
+                "Insufficient Balance"
+            )
+        ),
+    )
+    noted: list[str] = []
+
+    async def fake_notify(
+        bot: Any,
+        *,
+        group_id: int,
+        user_id: int,
+        reply_message_id: int | None = None,
+        message: str,
+    ) -> None:
+        _ = (bot, group_id, user_id, reply_message_id)
+        noted.append(message)
+
+    monkeypatch.setattr(flow_module.actions, "notify_admins", fake_notify)
+
+    bot: Any = FakeBot()
+    await start_verification(bot, group_id=123, user_id=10001)
+    replies = [
+        await handle_submission(
+            bot, group_id=123, user_id=10001, image_url="https://example.com/shelf.png"
+        )
+        for _ in range(3)
+    ]
+
+    text = _reply_text(replies[-1])
+    assert text.startswith("账户余额不足")
+    assert "已通知管理员处理" not in text
+    record = get_session_store().get("123", "10001")
+    assert record is not None and record.status == "awaiting_admin"
+    assert noted, "达上限必须仍通知管理员（文案极简不改流程）"
