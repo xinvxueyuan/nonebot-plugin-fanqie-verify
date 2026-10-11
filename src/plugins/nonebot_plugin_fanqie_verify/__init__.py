@@ -39,8 +39,19 @@ __plugin_meta__ = PluginMetadata(
         "shutdown": True,
         # ── 信息插件（命令「功能」）读的帮助元数据 ──
         "menu_type": "管理",
-        "commands": [],  # 纯被动插件：入群验证没有用户命令
         "order": 30,
+        # 命令表 = 本仓真实注册的命令（handle/qq/commands/*.py 的 on_command），
+        # 全部为超管命令；入群验证流程本身是被动的（自动提示成员发截图）。
+        "commands": [
+            {"command": "验证 <群号>", "desc": "多群待验证时私聊选群"},
+            {"command": "keep / 保留", "desc": "管理员放行成员（超管）"},
+            {"command": "通过 / 批准", "desc": "插入直接批准（超管）"},
+            {"command": "待处理列表 / 处理中列表", "desc": "待决策/待截图成员（超管）"},
+            {"command": "查看白名单", "desc": "本群作者与作品（超管）"},
+            {"command": "补验 / 延期 / 重审", "desc": "补扫漏验 / 延时 / 重审（超管）"},
+            {"command": "重载番茄OCR配置", "desc": "热重载放行策略（超管）"},
+            {"command": "设为验证公告", "desc": "公告绑定与查看（超管）"},
+        ],
     },
 )
 
