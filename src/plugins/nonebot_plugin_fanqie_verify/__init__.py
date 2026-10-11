@@ -37,6 +37,10 @@ __plugin_meta__ = PluginMetadata(
         "priority": 50,
         "startup": True,
         "shutdown": True,
+        # ── 信息插件（命令「功能」）读的帮助元数据 ──
+        "menu_type": "管理",
+        "commands": [],  # 纯被动插件：入群验证没有用户命令
+        "order": 30,
     },
 )
 
