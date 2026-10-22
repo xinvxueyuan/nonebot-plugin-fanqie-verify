@@ -2,11 +2,18 @@
 
 番茄读书群（QQ）入群验证插件：新成员入群后必须发送**自己发布的番茄小说书评详情页截图**，经 PaddleOCR（PP-OCRv6）云端 API 识别、校验「我」徽章、书名与作者后自动放行；验证失败则通知管理员决定通过或踢出。
 
+[![PyPI](https://img.shields.io/pypi/v/nonebot-plugin-fanqie-verify)](https://pypi.org/project/nonebot-plugin-fanqie-verify/)
+[![CI](https://github.com/xinvxueyuan/nonebot-plugin-fanqie-verify/actions/workflows/python.yml/badge.svg?branch=main)](https://github.com/xinvxueyuan/nonebot-plugin-fanqie-verify/actions/workflows/python.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.13-blue)](pyproject.toml)
+
+> **qbot 插件** · 宿主仓库：[xinvxueyuan/qbot](https://github.com/xinvxueyuan/qbot)
+
 > - 判定核心：检测到「**我**」徽章 + 提取到书名与作者（他人书评直接拒绝）
 > - OCR 多模型并行识别按字段融合，通过后**视觉模型二次复核**（持否决权）
 > - `/kick` 已于 2026-10-07 移除：手动移出成员请用 lingchu-bot 的「踢出」命令
 
-## 功能
+## 功能特性
 
 - **FR1 入群触发**：监听 OneBot V11 `group_increase` 事件，对新成员发送验证提示并开启超时计时
 - **FR2 图片识别**：接收新成员发送的图片，调用 PaddleOCR 云端 API **多模型并行识别并按字段融合**（PaddleOCR-VL-1.6 / PP-OCRv6 / PP-StructureV3，置信度阈值可配）；OCR 失败时回退**视觉模型看图判定**（支持**群聊发送**或**私聊机器人发送**两种方式验证）
@@ -28,29 +35,68 @@
 - **群公告已读闸门**：`FANQIE_NOTICE_GATE_ENABLED`（默认开）开启后，已用「设为验证公告」绑定公告的群里，未确认阅读全部绑定公告的新成员判**不通过**；该群未绑定公告、或查询接口调用失败时**不拦**（降级放行并在流程事件里记明细）。需要 LLBot v8.3.0+（提供 `get_group_notice_acklist`）
 - **验证公告绑定**：`获取群公告列表` 出图列出本群公告的 `notice_id`（QQ 客户端看不到 id），`设为验证公告` / `取消验证公告` / `查看验证公告` 管理绑定；绑定落在独立的 `fanqie_verification_notices.toml`，不写进放行策略文件
 
-## 命令
+## 安装
 
-| 命令 | 别名 | 说明 |
-|---|---|---|
-| `验证 <群号>` | `/验证`、`选择群`、`切换群` | 私聊机器人发送：多群待验证时指定在哪个群验证（恰有一个待验证群时直接发截图即可） |
-| `keep <user_id>` | `保留`、`留`、`/keep` | 通过并保留成员（仅限处于验证流程中的成员） |
-| `通过 <user_id>` | `直接通过`、`批准`、`放行`、`/通过`、`/approve` | **插入直接批准**：对新入群且仍在验证流程（等待截图 / 待管理员决策）的成员直接放行并欢迎，无需等待提交截图或超时 |
-| `待处理列表` | `待处理`、`未处理列表` | 查询本群等待管理员决策的成员及剩余时间 |
-| `处理中列表` | `处理中`、`验证中` | 查询本群正在等待截图提交（验证中）的成员 |
-| `补验 [小时数] [@成员/QQ号]` | `补验证`、`同步入群`、`漏验扫描`、`/补验` | 把错过入群事件的成员补进验证流程：无参数按默认窗口扫描，可带小时数（如 `补验 48`）或指定成员；`FANQIE_BACKFILL_CONFIRM_FIRST=true` 时先列名单 |
-| `补验确认` | `确认补验`、`/补验确认` | 执行 `补验` 列出的候选名单（仅 `CONFIRM_FIRST=true` 时用到） |
-| `延期 [@成员/QQ号] [小时数]` | `推迟`、`延长`、`/延期`、`/extend` | 推迟「待管理员决策」成员的自动移出时间（新截止 = 当前时间 + 延期时长）：不带成员时作用于本群全部待审成员；不带时长时用 `FANQIE_EXTEND_DEFAULT_HOURS`（默认 6 小时），单次上限 `FANQIE_EXTEND_MAX_HOURS`（默认 48 小时，超出按上限处理） |
-| `查看白名单` | `白名单`、`作者白名单`、`/白名单` | 展示当前群配置的作者与作品列表 |
-| `重载番茄OCR配置` | `重载OCR配置`、`重载配置` | 热重载放行策略 TOML |
-| `重审 [@成员]` | `重新审核`、`重新验证`、`/重审` | 普通成员重审**自己**（限 `FANQIE_REVIEW_MAX_TIMES` 次，默认 2）；管理员 `@成员` 可重审任意普通成员（不限次数）。重审复用完整验证流程：重置识别重试、重新发送引导、重排超时窗口 |
-| `获取群公告列表` | `群公告列表`、`公告列表`、`查看群公告`、`/公告列表` | 出图列出本群公告的 `notice_id`（并标注哪条能当验证公告；QQ 客户端看不到 id） |
-| `查看验证公告` | `验证公告`、`公告绑定`、`/验证公告` | 列出本群已绑定的验证公告 |
-| `设为验证公告 <id...>` | `绑定公告`、`添加验证公告`、`/设为验证公告` | 绑定公告为验证公告（可多个；逐个校验是否带确认环节，不合格的跳过并汇报） |
-| `取消验证公告 <id...\|全部>` | `解绑公告`、`移除验证公告`、`/取消验证公告` | 解绑验证公告 |
+### 依赖与接入
 
-- `<user_id>` 也可用 `@成员` 代替。命令前缀由 `COMMAND_START` 决定（默认 `/`）。「重审」命令不受前缀限制（`重审` 与 `/重审` 均可用）。
-- **权限**：除 `验证 <群号>`、`重审` 外，全部命令注册权限为 `SUPERUSER`。处理器内再按身份放行：`通过`、`待处理列表`、`处理中列表`、`查看白名单`、`重载番茄OCR配置` 仅限配置管理员（`FANQIE_ADMIN_IDS`）；`keep`、`延期` 在 `FANQIE_ALLOW_GROUP_ADMIN_COMMANDS=true`（默认）时群内管理员/群主亦可执行，否则仅配置管理员；`补验`/`补验确认` 配置管理员或群内管理员/群主（不受该开关限制）；全部公告类命令仅限超管。`重审` 所有群成员可重审自己，管理员可 `@成员` 重审他人。
-- 私聊验证通道（`FANQIE_PRIVATE_VERIFY_ENABLED`，默认开）：直接私聊发书评截图即可验证；若恰有一个待验证群则直接验证，多群则先提示用 `验证 群号` 选择。
+- 运行依赖（以 `pyproject.toml` 的 `dependencies` 为准）：`nonebot2[fastapi,httpx,websockets] >= 2.5.0`、
+  `nonebot-adapter-onebot >= 2.4.6`、`nonebot-plugin-localstore >= 0.7.4`、
+  `nonebot-plugin-orm[aiosqlite] >= 0.8.3`（验证会话持久化）、`aiofiles >= 25.1.0`、
+  `openai >= 1.0.0`（视觉模型调用）、`rtoml >= 0.13.0`（放行策略读写）
+- 可选依赖（extra `htmlkit`）：`nonebot-plugin-htmlkit == 0.1.0rc5`（群公告命令的图片渲染；未安装时这些命令自动回退纯文本，不影响入群验证主流程）
+- Python：`>= 3.13, < 3.14`
+- 已发布到 PyPI：包名 `nonebot-plugin-fanqie-verify`（当前 `0.4.0`），可 `pip install nonebot-plugin-fanqie-verify`；qbot 宿主侧按下面方式以子模块钉住版本。
+- 安装（宿主以 git 子模块引入）：
+
+```bash
+git submodule add -b main https://github.com/xinvxueyuan/nonebot-plugin-fanqie-verify.git \
+  vendor/nonebot-plugin-fanqie-verify
+git -C vendor/nonebot-plugin-fanqie-verify checkout <钉定的 SHA>
+```
+
+- 宿主 `[tool.nonebot] plugin_dirs` 加一行 `vendor/nonebot-plugin-fanqie-verify/src/plugins`
+  （本仓自带的 `plugin_dirs = ["src/plugins"]` 是插件独立开发时用的）
+
+### 快速开始
+
+前置要求：Python 3.13、[uv](https://docs.astral.sh/uv/)、一个 OneBot V11 实现（如
+[NapCat](https://napneko.github.io/) / [go-cqhttp](https://docs.go-cqhttp.org/)）。
+
+1. 安装依赖：
+
+   ```bash
+   uv sync --all-groups
+   ```
+
+2. 配置环境变量：复制 `.env.example` 为 `.env` 并填写：
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   至少需要配置：
+   - `FANQIE_OCR_API_TOKEN`：PaddleOCR 云端 API 令牌
+   - `SUPERUSERS` / `FANQIE_ADMIN_IDS`：管理员 QQ 号（`/keep`、
+     `重载番茄OCR配置` 命令权限，NoneBot 要求 SUPERUSER）
+   - 群范围：放行策略 TOML 中配置群节点（配置了节点的群才验证）
+
+3. 配置 OneBot V11 反向 WebSocket：
+
+   在 NapCat / go-cqhttp 中添加反向 WebSocket 连接，地址指向本插件的
+   `ws://<HOST>:<PORT>/onebot/v11/ws`（默认 `ws://127.0.0.1:8080/onebot/v11/ws`）。
+   HOST / PORT 由 `.env` 中的 `HOST` / `PORT` 决定。
+
+4. 首次运行生成放行策略配置，然后按需编辑（见「配置」节的「放行策略 TOML」）：
+
+   ```bash
+   uv run nb run
+   ```
+
+5. 运行机器人（开发热重载）：
+
+   ```bash
+   uv run nb run --reload
+   ```
 
 ## 配置
 
@@ -136,26 +182,64 @@ books = ["三体", "球状闪电"]
 受支持的元素名：`reader_name`、`publish_time`、`rating`、`read_duration`、
 `book_name`、`author`、`review_text`。
 
-## 依赖与安装
+## 使用 / 命令
 
-- 运行依赖（以 `pyproject.toml` 的 `dependencies` 为准）：`nonebot2[fastapi,httpx,websockets] >= 2.5.0`、
-  `nonebot-adapter-onebot >= 2.4.6`、`nonebot-plugin-localstore >= 0.7.4`、
-  `nonebot-plugin-orm[aiosqlite] >= 0.8.3`（验证会话持久化）、`aiofiles >= 25.1.0`、
-  `openai >= 1.0.0`（视觉模型调用）、`rtoml >= 0.13.0`（放行策略读写）
-- 可选依赖（extra `htmlkit`）：`nonebot-plugin-htmlkit == 0.1.0rc5`（群公告命令的图片渲染；未安装时这些命令自动回退纯文本，不影响入群验证主流程）
-- Python：`>= 3.13, < 3.14`
-- 安装（宿主以 git 子模块引入）：
+### 命令表
+
+| 命令 | 别名 | 说明 |
+|---|---|---|
+| `验证 <群号>` | `/验证`、`选择群`、`切换群` | 私聊机器人发送：多群待验证时指定在哪个群验证（恰有一个待验证群时直接发截图即可） |
+| `keep <user_id>` | `保留`、`留`、`/keep` | 通过并保留成员（仅限处于验证流程中的成员） |
+| `通过 <user_id>` | `直接通过`、`批准`、`放行`、`/通过`、`/approve` | **插入直接批准**：对新入群且仍在验证流程（等待截图 / 待管理员决策）的成员直接放行并欢迎，无需等待提交截图或超时 |
+| `待处理列表` | `待处理`、`未处理列表` | 查询本群等待管理员决策的成员及剩余时间 |
+| `处理中列表` | `处理中`、`验证中` | 查询本群正在等待截图提交（验证中）的成员 |
+| `补验 [小时数] [@成员/QQ号]` | `补验证`、`同步入群`、`漏验扫描`、`/补验` | 把错过入群事件的成员补进验证流程：无参数按默认窗口扫描，可带小时数（如 `补验 48`）或指定成员；`FANQIE_BACKFILL_CONFIRM_FIRST=true` 时先列名单 |
+| `补验确认` | `确认补验`、`/补验确认` | 执行 `补验` 列出的候选名单（仅 `CONFIRM_FIRST=true` 时用到） |
+| `延期 [@成员/QQ号] [小时数]` | `推迟`、`延长`、`/延期`、`/extend` | 推迟「待管理员决策」成员的自动移出时间（新截止 = 当前时间 + 延期时长）：不带成员时作用于本群全部待审成员；不带时长时用 `FANQIE_EXTEND_DEFAULT_HOURS`（默认 6 小时），单次上限 `FANQIE_EXTEND_MAX_HOURS`（默认 48 小时，超出按上限处理） |
+| `查看白名单` | `白名单`、`作者白名单`、`/白名单` | 展示当前群配置的作者与作品列表 |
+| `重载番茄OCR配置` | `重载OCR配置`、`重载配置` | 热重载放行策略 TOML |
+| `重审 [@成员]` | `重新审核`、`重新验证`、`/重审` | 普通成员重审**自己**（限 `FANQIE_REVIEW_MAX_TIMES` 次，默认 2）；管理员 `@成员` 可重审任意普通成员（不限次数）。重审复用完整验证流程：重置识别重试、重新发送引导、重排超时窗口 |
+| `获取群公告列表` | `群公告列表`、`公告列表`、`查看群公告`、`/公告列表` | 出图列出本群公告的 `notice_id`（并标注哪条能当验证公告；QQ 客户端看不到 id） |
+| `查看验证公告` | `验证公告`、`公告绑定`、`/验证公告` | 列出本群已绑定的验证公告 |
+| `设为验证公告 <id...>` | `绑定公告`、`添加验证公告`、`/设为验证公告` | 绑定公告为验证公告（可多个；逐个校验是否带确认环节，不合格的跳过并汇报） |
+| `取消验证公告 <id...\|全部>` | `解绑公告`、`移除验证公告`、`/取消验证公告` | 解绑验证公告 |
+
+- `<user_id>` 也可用 `@成员` 代替。命令前缀由 `COMMAND_START` 决定（默认 `/`）。「重审」命令不受前缀限制（`重审` 与 `/重审` 均可用）。
+- **权限**：除 `验证 <群号>`、`重审` 外，全部命令注册权限为 `SUPERUSER`。处理器内再按身份放行：`通过`、`待处理列表`、`处理中列表`、`查看白名单`、`重载番茄OCR配置` 仅限配置管理员（`FANQIE_ADMIN_IDS`）；`keep`、`延期` 在 `FANQIE_ALLOW_GROUP_ADMIN_COMMANDS=true`（默认）时群内管理员/群主亦可执行，否则仅配置管理员；`补验`/`补验确认` 配置管理员或群内管理员/群主（不受该开关限制）；全部公告类命令仅限超管。`重审` 所有群成员可重审自己，管理员可 `@成员` 重审他人。
+- 私聊验证通道（`FANQIE_PRIVATE_VERIFY_ENABLED`，默认开）：直接私聊发书评截图即可验证；若恰有一个待验证群则直接验证，多群则先提示用 `验证 群号` 选择。
+
+### 验证目标与判定
+
+新成员需发送**自己发布的番茄小说书评详情页截图**。页面关键标识：
+
+- 「**我**」徽章：书评为自己发布（他人书评无此徽章，将被拒绝）
+- 读者名、发布日期、评分（★）、阅读时长、书评正文
+- 书名（如 `综漫：吉他雇佣兵无法找到归宿？`）、作者
+
+判定标准：**必须检测到「我」徽章 + 提取到书名与作者**。
+
+### 验证流程
+
+1. 新成员入群 → 机器人 @ 成员发送验证提示并开始超时计时
+2. 成员发送**自己发布的书评详情页截图** → OCR 识别 → 提取「我」徽章、书名、作者、读者名等
+3. 综合判断：本人书评（「我」徽章）+ 信息足够 + 放行策略满足 + 合理性通过 → **放行**（欢迎）
+4. 否则（他人书评 / 缺少书名作者 / 白名单不命中 / 超时未发图 / 识别失败达上限）→ 转入**待管理员决策**并私信通知管理员，同时响应超时会在群内 @ 成员提示已超时、可发「重审」；管理员用 `/keep` 放行（移出请用 lingchu-bot 的「踢出」命令）
+5. 管理员超过 `FANQIE_ADMIN_DECISION_TIMEOUT`（默认 16 小时）未处理 → 被移出前最后 1 小时、5 分钟各在群内 @ 提醒该成员；仍未处理则群内通报并移出该成员
+6. 所有进行中的会话（等待提交 / 待管理员决策）持久化到数据库，重启后自动恢复，不会把验证中的成员误当作已通过
+
+## 开发与测试
+
+### 本地命令
 
 ```bash
-git submodule add -b main https://github.com/xinvxueyuan/nonebot-plugin-fanqie-verify.git \
-  vendor/nonebot-plugin-fanqie-verify
-git -C vendor/nonebot-plugin-fanqie-verify checkout <钉定的 SHA>
+task check   # ruff + pyright
+task test    # pytest
+task fix     # 自动修复 lint/格式
 ```
 
-- 宿主 `[tool.nonebot] plugin_dirs` 加一行 `vendor/nonebot-plugin-fanqie-verify/src/plugins`
-  （本仓自带的 `plugin_dirs = ["src/plugins"]` 是插件独立开发时用的）
+插件源码位于 `src/plugins/nonebot_plugin_fanqie_verify/`。
 
-## 测试与门禁
+### 测试与门禁
 
 ```bash
 uv run python -m pytest tests/ -q
@@ -166,85 +250,22 @@ uv run pyright
 - 等价的 Taskfile 封装：`task test`、`task check`、`task fix`、`task ci`（check → test）。
 - 冒烟测试：`uv run python -m pytest -m smoke`（插件加载与核心业务链路的快速验证，`tests/smoke/`）。
 
-## 如何开始
+## 许可证与相关仓库
 
-前置要求：Python 3.13、[uv](https://docs.astral.sh/uv/)、一个 OneBot V11 实现（如
-[NapCat](https://napneko.github.io/) / [go-cqhttp](https://docs.go-cqhttp.org/)）。
+### 许可证
 
-1. 安装依赖：
+MIT（见仓库根目录 `LICENSE` 文件，Copyright (c) 2026 xinvxueyuan；`pyproject.toml` 的 `license` 字段同为 MIT）。
 
-   ```bash
-   uv sync --all-groups
-   ```
+### 相关仓库
 
-2. 配置环境变量：复制 `.env.example` 为 `.env` 并填写：
+- [xinvxueyuan/qbot](https://github.com/xinvxueyuan/qbot)：宿主仓库，本插件以 `vendor/` 子模块方式接入。
+- [xinvxueyuan/lingchu-bot](https://github.com/xinvxueyuan/lingchu-bot)：`/kick` 移除后，手动移出成员改用 lingchu-bot 的「踢出」命令。
 
-   ```bash
-   cp .env.example .env
-   ```
-
-   至少需要配置：
-   - `FANQIE_OCR_API_TOKEN`：PaddleOCR 云端 API 令牌
-   - `SUPERUSERS` / `FANQIE_ADMIN_IDS`：管理员 QQ 号（`/keep`、
-     `重载番茄OCR配置` 命令权限，NoneBot 要求 SUPERUSER）
-   - 群范围：放行策略 TOML 中配置群节点（配置了节点的群才验证）
-
-3. 配置 OneBot V11 反向 WebSocket：
-
-   在 NapCat / go-cqhttp 中添加反向 WebSocket 连接，地址指向本插件的
-   `ws://<HOST>:<PORT>/onebot/v11/ws`（默认 `ws://127.0.0.1:8080/onebot/v11/ws`）。
-   HOST / PORT 由 `.env` 中的 `HOST` / `PORT` 决定。
-
-4. 首次运行生成放行策略配置，然后按需编辑（见上文）：
-
-   ```bash
-   uv run nb run
-   ```
-
-5. 运行机器人（开发热重载）：
-
-   ```bash
-   uv run nb run --reload
-   ```
-
-## 验证目标与判定
-
-新成员需发送**自己发布的番茄小说书评详情页截图**。页面关键标识：
-
-- 「**我**」徽章：书评为自己发布（他人书评无此徽章，将被拒绝）
-- 读者名、发布日期、评分（★）、阅读时长、书评正文
-- 书名（如 `综漫：吉他雇佣兵无法找到归宿？`）、作者
-
-判定标准：**必须检测到「我」徽章 + 提取到书名与作者**。
-
-## 验证流程
-
-1. 新成员入群 → 机器人 @ 成员发送验证提示并开始超时计时
-2. 成员发送**自己发布的书评详情页截图** → OCR 识别 → 提取「我」徽章、书名、作者、读者名等
-3. 综合判断：本人书评（「我」徽章）+ 信息足够 + 放行策略满足 + 合理性通过 → **放行**（欢迎）
-4. 否则（他人书评 / 缺少书名作者 / 白名单不命中 / 超时未发图 / 识别失败达上限）→ 转入**待管理员决策**并私信通知管理员，同时响应超时会在群内 @ 成员提示已超时、可发「重审」；管理员用 `/keep` 放行（移出请用 lingchu-bot 的「踢出」命令）
-5. 管理员超过 `FANQIE_ADMIN_DECISION_TIMEOUT`（默认 16 小时）未处理 → 被移出前最后 1 小时、5 分钟各在群内 @ 提醒该成员；仍未处理则群内通报并移出该成员
-6. 所有进行中的会话（等待提交 / 待管理员决策）持久化到数据库，重启后自动恢复，不会把验证中的成员误当作已通过
-
-## 开发
-
-```bash
-task check   # ruff + pyright
-task test    # pytest
-task fix     # 自动修复 lint/格式
-```
-
-插件源码位于 `src/plugins/nonebot_plugin_fanqie_verify/`。
-
-## 更新日志
+### 更新日志
 
 各版本的重要变更见 [CHANGELOG.md](./CHANGELOG.md)。
 
-## 文档
+### 延伸阅读
 
 - [NoneBot2 文档](https://nonebot.dev/)
 - [PaddleOCR / PP-OCRv6](https://www.paddleocr.ai/)
-
-## 许可
-
-MIT（见仓库根目录 `LICENSE` 文件，Copyright (c) 2026 xinvxueyuan；`pyproject.toml` 的 `license` 字段同为 MIT）。
